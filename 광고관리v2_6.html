@@ -1,0 +1,2873 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>쿠팡 로켓 재고 & 판매량 누적 분석기 v2.5</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF.js (PDF 텍스트 추출용) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-variant-numeric: tabular-nums;
+        }
+        .tabular-nums { font-variant-numeric: tabular-nums; }
+        .drag-over { border-color: #2563eb !important; background-color: #eff6ff !important; }
+
+        /* 커스텀 스크롤바 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .sortable-th { cursor: pointer; user-select: none; transition: background-color 0.15s ease; }
+        .sortable-th:hover { background-color: #e2e8f0 !important; }
+
+        /* 상품명 하단 통일 규격 뱃지 */
+        .uniform-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 22px;
+            min-width: 62px;
+            padding: 0 7px;
+            border-radius: 5px;
+            font-size: 10px;
+            font-weight: 800;
+            line-height: 1;
+            white-space: nowrap;
+        }
+
+        /* 상세 팝업 상단 통일 규격 뱃지 */
+        .detail-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 24px;
+            min-width: 78px;
+            padding: 0 9px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 800;
+            line-height: 1;
+            white-space: nowrap;
+        }
+
+        /* 토스트 애니메이션 */
+        @keyframes fadeSlideDown {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .toast-anim { animation: fadeSlideDown 0.18s ease-out; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col overflow-x-hidden">
+
+    <!-- 상단 헤더 & 네비게이션 -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+        <div class="max-w-[1640px] mx-auto px-3 sm:px-5 py-2.5 flex flex-wrap justify-between items-center gap-2.5">
+            <div class="flex items-center flex-wrap gap-2.5">
+                <!-- 쿠팡 로고 URL 등록 슬롯 (타이틀 왼쪽) -->
+                <div id="headerLogoSlot" onclick="openHeaderLogoModal()" class="h-8 px-2.5 rounded-lg border border-dashed border-slate-300 hover:border-blue-500 bg-slate-50 hover:bg-blue-50/40 flex items-center justify-center cursor-pointer transition-all shrink-0" title="클릭하여 쿠팡 로고 이미지 URL 설정">
+                    <img id="headerLogoImg" src="" alt="로고" class="h-6 max-w-[110px] w-auto object-contain hidden" onerror="this.classList.add('hidden'); document.getElementById('headerLogoPlaceholder').classList.remove('hidden');">
+                    <span id="headerLogoPlaceholder" class="text-[11px] font-extrabold text-slate-500 hover:text-blue-600 flex items-center gap-1 whitespace-nowrap">
+                        <i data-lucide="image-plus" class="w-3.5 h-3.5 text-blue-600"></i>
+                        <span>+ 로고 URL</span>
+                    </span>
+                </div>
+
+                <!-- 타이틀 & 버전 뱃지 -->
+                <div class="flex items-center gap-2">
+                    <h1 class="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight whitespace-nowrap">쿠팡 재고 & 판매량 누적 분석기</h1>
+                    <span class="px-1.5 py-0.5 text-[10px] font-extrabold bg-slate-900 text-white rounded-md tracking-wide">v2.5</span>
+                </div>
+
+                <!-- 메인 탭 2개 -->
+                <div class="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 ml-0 sm:ml-2">
+                    <button id="tabBtnDashboard" onclick="switchMainTab('DASHBOARD')" class="px-3 py-1 text-xs font-extrabold rounded-lg bg-white text-blue-600 shadow-2xs transition-all flex items-center gap-1.5 whitespace-nowrap">
+                        <span>📊 재고/판매 대시보드</span>
+                    </button>
+                    <button id="tabBtnManager" onclick="switchMainTab('MANAGER')" class="px-3 py-1 text-xs font-bold rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5 whitespace-nowrap">
+                        <span>📋 제품 리스트 관리</span>
+                        <span id="hiddenCountBadge" class="hidden px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full text-[10px]">0</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 우측 유틸리티 버튼 -->
+            <div class="flex flex-wrap items-center gap-1.5">
+                <input type="file" id="backupInput" accept=".json" class="hidden">
+                <button id="btnDownloadCsv" class="inline-flex items-center px-2.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-2xs transition-all disabled:opacity-40 disabled:pointer-events-none">
+                    <i data-lucide="file-spreadsheet" class="w-3.5 h-3.5 mr-1"></i>
+                    <span>엑셀 CSV</span>
+                </button>
+                <button id="btnBackupJson" class="inline-flex items-center px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-all">
+                    <i data-lucide="hard-drive-download" class="w-3.5 h-3.5 mr-1 text-indigo-600"></i>
+                    <span>JSON 백업</span>
+                </button>
+                <button id="btnRestoreJson" class="inline-flex items-center px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-all">
+                    <i data-lucide="upload" class="w-3.5 h-3.5 mr-1 text-blue-600"></i>
+                    <span>JSON 복원</span>
+                </button>
+                <button id="btnResetDb" class="inline-flex items-center px-2.5 py-1.5 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg transition-all" title="전체 기록 초기화">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5 mr-1"></i>
+                    <span>데이터 초기화</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 메인 컨텐츠 -->
+    <main class="max-w-[1640px] mx-auto px-3 sm:px-5 py-3 flex-1 w-full space-y-2.5">
+
+        <!-- 토스트 알림 배너 -->
+        <div id="statusBanner" class="hidden rounded-xl px-3.5 py-2 text-xs font-semibold flex items-center justify-between border shadow-xs toast-anim"></div>
+
+        <!-- ==================== [탭 1] 재고/판매 대시보드 ==================== -->
+        <div id="dashboardView" class="space-y-2.5">
+
+            <!-- 1. 상단 초슬림 원라인 툴바 -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-xs px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                <!-- 좌측: 기준일 선택기 + 컴팩트 파일 업로드 드롭존 -->
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <div class="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+                        <i data-lucide="calendar" class="w-3.5 h-3.5 text-blue-600 shrink-0"></i>
+                        <span class="text-[11px] font-bold text-slate-600 whitespace-nowrap">기준일</span>
+                        <input type="date" id="uploadDateInput" class="bg-transparent text-slate-900 text-xs font-extrabold focus:outline-none cursor-pointer w-[112px]">
+                        <span id="uploadDateWeekdayBadge" class="text-[11px] font-extrabold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded whitespace-nowrap">-</span>
+                        <button id="btnSetToday" class="text-[10px] font-bold px-1.5 py-0.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded transition-colors">오늘</button>
+                    </div>
+
+                    <div id="dropZone" class="border border-dashed border-blue-400 bg-blue-50/50 hover:bg-blue-100/70 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 cursor-pointer transition-all group" title="클릭하거나 여러 쿠팡 HTML/PDF 파일을 이곳에 끌어다 놓으세요">
+                        <input type="file" id="fileInput" accept=".html,.htm,.pdf" multiple class="hidden">
+                        <i data-lucide="upload-cloud" class="w-4 h-4 text-blue-600 shrink-0 group-hover:scale-110 transition-transform"></i>
+                        <span class="text-xs font-extrabold text-slate-800 whitespace-nowrap">
+                            <span id="dropZoneDateLabel" class="text-blue-600 underline"></span> 업로드
+                        </span>
+                        <span class="hidden md:inline text-[10px] text-blue-700 bg-blue-100/80 px-1.5 py-0.5 rounded font-bold whitespace-nowrap">다중합산·드롭</span>
+                    </div>
+                </div>
+
+                <!-- 중앙: 누적일 타임라인 (최근 5일 칩 + 개별 삭제 × + 5일 초과 시 드롭다운) -->
+                <div class="flex items-center gap-1.5 flex-1 min-w-[200px] overflow-hidden border-l border-slate-200 pl-2.5">
+                    <div class="flex items-center gap-1 shrink-0">
+                        <span class="text-[11px] font-bold text-slate-600">누적</span>
+                        <span id="dbCountBadge" class="px-1.5 py-0.5 text-[10px] font-extrabold bg-slate-100 text-slate-700 rounded">0일</span>
+                    </div>
+                    <div id="datePillsContainer" class="flex items-center gap-1 overflow-x-auto py-0.5">
+                        <span class="text-xs text-slate-400">저장된 날짜 없음</span>
+                    </div>
+                </div>
+
+                <!-- 우측: 기본 리드타임 + 신규 이상감지 민감도 셀렉터 -->
+                <div class="flex flex-wrap items-center gap-2 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 shrink-0">
+                    <div class="flex items-center gap-1">
+                        <span class="text-[11px] font-bold text-slate-600 whitespace-nowrap">🚨 리드타임</span>
+                        <input type="number" id="leadTimeInput" value="7" min="1" max="90" class="w-10 text-center bg-white border border-slate-300 rounded py-0.5 text-xs font-extrabold text-rose-600 focus:outline-none focus:border-blue-500">
+                        <span class="text-[11px] text-slate-500">일</span>
+                    </div>
+                    <span class="text-slate-300">|</span>
+                    <div class="flex items-center gap-1" title="최근 3일 평균 vs 직전 7일 평균 판매 급증·급감 판정 민감도">
+                        <span class="text-[11px] font-bold text-slate-600 whitespace-nowrap">⚡ 이상감지</span>
+                        <select id="sensitivitySelect" class="bg-white border border-slate-300 rounded px-1.5 py-0.5 text-[11px] font-bold text-indigo-700 focus:outline-none focus:border-blue-500 cursor-pointer">
+                            <option value="SENSITIVE">민감 (±30%)</option>
+                            <option value="STANDARD" selected>표준 (+50%·-40%)</option>
+                            <option value="CONSERVATIVE">보수 (+70%·-55%)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. 5개 핵심 KPI 카드 (전폭 배치, 클릭 시 필터 토글) -->
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+                <!-- 1) 전체 상품 -->
+                <div id="kpiCardAll" onclick="toggleKpiCardFilter('ALL')" class="bg-white px-3.5 py-2.5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between cursor-pointer hover:border-slate-400 transition-all" title="클릭하여 전체 상품 보기">
+                    <div class="min-w-0">
+                        <div class="text-[11px] font-bold text-slate-500 truncate">전체 상품</div>
+                        <div class="text-lg font-extrabold text-slate-900 leading-tight mt-0.5 tabular-nums" id="kpiTotalItems">0<span class="text-xs font-normal text-slate-500 ml-0.5">개</span></div>
+                        <div class="text-[10px] text-slate-500 font-semibold mt-0.5 truncate" id="kpiSoldOutSub">품절 0개 · 총재고 0개</div>
+                    </div>
+                    <div class="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
+                        <i data-lucide="package" class="w-4 h-4"></i>
+                    </div>
+                </div>
+
+                <!-- 2) 🚨 발주 시급 -->
+                <div id="kpiCardUrgent" onclick="toggleKpiCardFilter('URGENT_ORDER')" class="bg-rose-50/70 px-3.5 py-2.5 rounded-xl border border-rose-200 shadow-xs flex items-center justify-between cursor-pointer hover:bg-rose-100/70 transition-all" title="클릭하여 발주 시급 상품만 모아보기">
+                    <div class="min-w-0">
+                        <div class="text-[11px] font-extrabold text-rose-800 truncate">🚨 발주 시급</div>
+                        <div class="text-lg font-extrabold text-rose-600 leading-tight mt-0.5 tabular-nums" id="kpiUrgentOrder">0<span class="text-xs font-normal text-rose-500 ml-0.5">개</span></div>
+                        <div class="text-[10px] text-rose-700 font-semibold mt-0.5 truncate" id="kpiLeadTimeDesc">D-Day ≤ 7일 리드타임</div>
+                    </div>
+                    <div class="w-8 h-8 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                        <i data-lucide="siren" class="w-4 h-4"></i>
+                    </div>
+                </div>
+
+                <!-- 3) ⚠️ 위너 미선정 -->
+                <div id="kpiCardNotWinner" onclick="toggleKpiCardFilter('NOT_WINNER')" class="bg-amber-50/70 px-3.5 py-2.5 rounded-xl border border-amber-200 shadow-xs flex items-center justify-between cursor-pointer hover:bg-amber-100/70 transition-all" title="클릭하여 위너 미선정 상품만 모아보기">
+                    <div class="min-w-0">
+                        <div class="text-[11px] font-extrabold text-amber-900 truncate">⚠️ 위너 미선정</div>
+                        <div class="text-lg font-extrabold text-amber-600 leading-tight mt-0.5 tabular-nums" id="kpiNotWinner">0<span class="text-xs font-normal text-amber-600 ml-0.5">개</span></div>
+                        <div class="text-[10px] text-amber-800 font-semibold mt-0.5 truncate" id="kpiWinnerRate">위너 선정 0개 · 점유율 -</div>
+                    </div>
+                    <div class="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                        <i data-lucide="award" class="w-4 h-4"></i>
+                    </div>
+                </div>
+
+                <!-- 4) 📦 추가 입고 감지 -->
+                <div id="kpiCardRestocked" onclick="toggleKpiCardFilter('RESTOCKED')" class="bg-sky-50/70 px-3.5 py-2.5 rounded-xl border border-sky-200 shadow-xs flex items-center justify-between cursor-pointer hover:bg-sky-100/70 transition-all" title="클릭하여 최근 추가 입고 감지 상품만 모아보기">
+                    <div class="min-w-0">
+                        <div class="text-[11px] font-extrabold text-sky-900 truncate">📦 추가 입고 감지</div>
+                        <div class="text-lg font-extrabold text-sky-600 leading-tight mt-0.5 tabular-nums" id="kpiRestocked">0<span class="text-xs font-normal text-sky-500 ml-0.5">건</span></div>
+                        <div class="text-[10px] text-sky-700 font-semibold mt-0.5 truncate">평균 왜곡 자동 제외됨</div>
+                    </div>
+                    <div class="w-8 h-8 rounded-lg bg-sky-100 text-sky-600 flex items-center justify-center shrink-0">
+                        <i data-lucide="package-plus" class="w-4 h-4"></i>
+                    </div>
+                </div>
+
+                <!-- 5) ⚡ 판매 급증·급감 (신규) -->
+                <div id="kpiCardAnomaly" onclick="toggleKpiCardFilter('ANOMALY_ALL')" class="bg-indigo-50/70 px-3.5 py-2.5 rounded-xl border border-indigo-200 shadow-xs flex items-center justify-between col-span-2 md:col-span-1 cursor-pointer hover:bg-indigo-100/70 transition-all" title="클릭하여 판매 급증·급감 이상 상품만 모아보기">
+                    <div class="min-w-0">
+                        <div class="text-[11px] font-extrabold text-indigo-900 truncate">⚡ 판매 급증·급감</div>
+                        <div class="text-lg font-extrabold leading-tight mt-0.5 tabular-nums" id="kpiAnomalyCounts">
+                            <span class="text-orange-600">0</span><span class="text-slate-300 mx-1 font-normal">/</span><span class="text-indigo-600">0</span>
+                        </div>
+                        <div class="text-[10px] text-indigo-700 font-semibold mt-0.5 truncate">3일 vs 직전 7일 안정형</div>
+                    </div>
+                    <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
+                        <i data-lucide="activity" class="w-4 h-4"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. 검색 & 필터 바 -->
+            <div class="bg-white px-3.5 py-2.5 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-2">
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <!-- 검색창 -->
+                    <div class="relative w-52 sm:w-60">
+                        <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2"></i>
+                        <input type="text" id="searchInput" placeholder="상품명, 별칭 또는 ID 검색..." class="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600 focus:bg-white transition-all">
+                        <button id="btnClearSearch" type="button" onclick="clearSearchInput()" class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-xs font-bold">✕</button>
+                    </div>
+
+                    <!-- 배송구분 원클릭 필터 -->
+                    <div class="inline-flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
+                        <button id="shipTab_ALL" onclick="setDeliveryTypeFilter('ALL')" class="px-2 py-1 rounded-md font-extrabold bg-white text-slate-800 shadow-2xs transition-all">전체</button>
+                        <button id="shipTab_ROCKET" onclick="setDeliveryTypeFilter('ROCKET')" class="px-2 py-1 rounded-md font-bold text-slate-600 hover:text-sky-700 transition-all">🚀 로켓배송</button>
+                        <button id="shipTab_FRESH" onclick="setDeliveryTypeFilter('FRESH')" class="px-2 py-1 rounded-md font-bold text-slate-600 hover:text-emerald-700 transition-all">🌿 로켓프레시</button>
+                    </div>
+
+                    <!-- 신규: 판매 이상 원클릭 토글 칩 -->
+                    <div class="inline-flex items-center gap-1">
+                        <button id="chipFilterSurge" onclick="toggleKpiCardFilter('SURGE')" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold border border-orange-200 bg-orange-50/70 text-orange-700 hover:bg-orange-100 transition-all whitespace-nowrap">
+                            <span>🔥 급증</span>
+                            <span id="chipSurgeCount" class="px-1.5 py-0.2 bg-white/80 rounded-full text-[10px] tabular-nums">0</span>
+                        </button>
+                        <button id="chipFilterDrop" onclick="toggleKpiCardFilter('DROP')" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold border border-indigo-200 bg-indigo-50/70 text-indigo-700 hover:bg-indigo-100 transition-all whitespace-nowrap">
+                            <span>📉 급감</span>
+                            <span id="chipDropCount" class="px-1.5 py-0.2 bg-white/80 rounded-full text-[10px] tabular-nums">0</span>
+                        </button>
+                    </div>
+
+                    <!-- 상태 필터 드롭다운 -->
+                    <select id="filterSelect" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-600">
+                        <option value="ALL">📋 전체 상태</option>
+                        <option value="ANOMALY_ALL">⚡ 판매 급증·급감 전체</option>
+                        <option value="SURGE">🔥 판매 급증 상품만</option>
+                        <option value="DROP">📉 판매 급감 상품만</option>
+                        <option value="URGENT_ORDER">🚨 발주 시급 (리드타임 내)</option>
+                        <option value="NOT_WINNER">⚠️ 아이템 위너 미선정</option>
+                        <option value="LOW_STOCK">⚡ 품절 임박 (재고 1~10개)</option>
+                        <option value="SOLD_OUT">❌ 현재 품절 (0개)</option>
+                        <option value="RESTOCKED">📦 최근 추가 입고 발생</option>
+                        <option value="HIGH_VELOCITY">🚀 일평균 5개 이상 판매</option>
+                        <option value="STARRED">⭐ 즐겨찾기 관심 상품</option>
+                    </select>
+
+                    <!-- 판매속도 기준 선택 -->
+                    <select id="basisSelect" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold text-blue-700 focus:outline-none focus:border-blue-600" title="일평균 판매속도 및 D-Day 계산 기준">
+                        <option value="AVG7">속도기준: 7일 평균</option>
+                        <option value="AVG3">속도기준: 3일 평균</option>
+                        <option value="AVG_ALL">속도기준: 전체 평균</option>
+                    </select>
+                </div>
+
+                <!-- 우측 액션: 발주 필요 목록 복사 & 합산 파일 안내 -->
+                <div class="flex items-center gap-2">
+                    <span id="uploadedFilesInfo" class="hidden xl:inline-block text-[11px] text-blue-700 font-bold bg-blue-50 px-2 py-1 rounded-md border border-blue-200 truncate max-w-[180px]"></span>
+                    <button id="btnCopyOrderSummary" onclick="copyUrgentOrderSummary()" class="inline-flex items-center px-2.5 py-1.5 text-xs font-extrabold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-all whitespace-nowrap" title="발주 시급/품절 상품의 30일 권장 발주 목록을 클립보드에 복사합니다">
+                        <i data-lucide="clipboard-list" class="w-3.5 h-3.5 mr-1"></i>
+                        <span>발주 필요 목록 복사</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 4. 신규: 판매 이상 브리핑 배너 (이상 상품 1개 이상 시 자동 표시) -->
+            <div id="anomalyBriefingBanner" class="hidden rounded-xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white px-4 py-2.5 shadow-sm border border-indigo-800/60 flex flex-wrap items-center justify-between gap-2 toast-anim">
+                <div class="flex items-center flex-wrap gap-2 text-xs">
+                    <span class="font-extrabold text-amber-300">📢 판매 이상 감지</span>
+                    <span class="text-slate-300 text-[11px]">(최근 3일 vs 직전 7일 안정형):</span>
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-orange-500/20 border border-orange-400/40 text-orange-200 font-extrabold tabular-nums">
+                        🔥 급증 <span id="briefingSurgeCnt">0</span>개
+                    </span>
+                    <span class="text-slate-500">·</span>
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-500/25 border border-indigo-400/40 text-indigo-200 font-extrabold tabular-nums">
+                        📉 급감 <span id="briefingDropCnt">0</span>개
+                    </span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <button onclick="applyAnomalyBriefingFilter('SURGE')" class="px-2.5 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-extrabold transition-colors whitespace-nowrap">🔥 급증만 보기</button>
+                    <button onclick="applyAnomalyBriefingFilter('DROP')" class="px-2.5 py-1 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white text-[11px] font-extrabold transition-colors whitespace-nowrap">📉 급감만 보기</button>
+                    <button onclick="dismissAnomalyBriefing()" class="w-6 h-6 rounded-md bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center text-xs font-bold ml-1" title="브리핑 닫기">✕</button>
+                </div>
+            </div>
+
+            <!-- 5. 대시보드 메인 테이블 (가로 스크롤 없는 한 화면 8열 구조) -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                <div class="overflow-x-auto max-h-[calc(100vh-260px)]">
+                    <table class="w-full text-left border-collapse table-fixed">
+                        <thead class="sticky top-0 z-20 shadow-2xs">
+                            <tr class="bg-slate-100 border-b-2 border-slate-300 text-[11px] font-extrabold text-slate-700 tracking-tight">
+                                <th onclick="toggleColumnSort('NAME')" class="sortable-th py-2.5 px-3 w-[34%] min-w-[270px] bg-slate-100">
+                                    <div class="flex items-center justify-between gap-1">
+                                        <span>상품 정보 (★ · 이미지 · 상품명 · 뱃지)</span>
+                                        <span id="sortIcon_NAME" class="text-slate-400 text-[11px]">↕</span>
+                                    </div>
+                                </th>
+                                <th onclick="toggleColumnSort('PRICE')" class="sortable-th py-2.5 px-2 w-[9%] text-right bg-slate-100 border-l border-slate-200/80">
+                                    <div class="flex items-center justify-end gap-1">
+                                        <span>판매가</span>
+                                        <span id="sortIcon_PRICE" class="text-slate-400 text-[11px]">↕</span>
+                                    </div>
+                                </th>
+                                <th onclick="toggleColumnSort('STOCK')" class="sortable-th py-2.5 px-2 w-[11%] text-right bg-slate-100 border-l border-slate-200/80">
+                                    <div class="flex items-center justify-end gap-1">
+                                        <div>현재 재고 / 변동<span class="block text-[9px] font-medium text-slate-500">직전 대비 판매·입고</span></div>
+                                        <span id="sortIcon_STOCK" class="text-slate-400 text-[11px]">↕</span>
+                                    </div>
+                                </th>
+                                <th class="py-2.5 px-2 w-[12%] bg-slate-100 border-l border-slate-200/80">
+                                    <div>최근 재고 추이<span class="block text-[9px] font-medium text-slate-500">최근 3회 · 14일 그래프</span></div>
+                                </th>
+                                <th onclick="toggleColumnSort('AVG_SALES')" class="sortable-th py-2.5 px-2 w-[11%] text-center bg-slate-100 border-l border-slate-200/80">
+                                    <div class="flex items-center justify-center gap-1">
+                                        <div>일평균 판매속도<span class="block text-[9px] font-medium text-slate-500">급증·급감 이상뱃지</span></div>
+                                        <span id="sortIcon_AVG_SALES" class="text-slate-400 text-[11px]">↕</span>
+                                    </div>
+                                </th>
+                                <th onclick="toggleColumnSort('DDAY')" class="sortable-th py-2.5 px-2 w-[9%] text-center bg-slate-100 border-l border-slate-200/80">
+                                    <div class="flex items-center justify-center gap-1">
+                                        <div>품절 D-Day<span class="block text-[9px] font-medium text-slate-500">리드타임 경보</span></div>
+                                        <span id="sortIcon_DDAY" class="text-slate-400 text-[11px]">↕</span>
+                                    </div>
+                                </th>
+                                <th onclick="toggleColumnSort('SEARCH')" class="sortable-th py-2.5 px-2 w-[7%] text-right bg-slate-100 border-l border-slate-200/80">
+                                    <div class="flex items-center justify-end gap-1">
+                                        <div>노출·클릭</div>
+                                        <span id="sortIcon_SEARCH" class="text-slate-400 text-[11px]">↕</span>
+                                    </div>
+                                </th>
+                                <th onclick="toggleColumnSort('GMV')" class="sortable-th py-2.5 px-2 w-[7%] text-right bg-slate-100 border-l border-slate-200/80">
+                                    <div class="flex items-center justify-end gap-1">
+                                        <div>매출·전환</div>
+                                        <span id="sortIcon_GMV" class="text-slate-400 text-[11px]">↕</span>
+                                    </div>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="tableBody" class="divide-y divide-slate-200/80 text-xs"></tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div> <!-- /#dashboardView -->
+
+        <!-- ==================== [탭 2] 제품 리스트 관리 ==================== -->
+        <div id="productManagerView" class="hidden space-y-3">
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                        <i data-lucide="boxes" class="w-4 h-4 text-blue-600"></i>
+                        <span>전체 제품 마스터 리스트 관리</span>
+                        <span id="mgrTotalCount" class="ml-1 px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded-full font-extrabold">0개</span>
+                    </h2>
+                    <p class="text-xs text-slate-500 mt-0.5">상품별 <b>배송 구분(로켓배송/로켓프레시), 관리용 별칭, 이미지 URL, 쿠팡 판매 링크, 개별 리드타임, 발주 메모, 즐겨찾기, 숨김</b>을 관리합니다.</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <div class="relative w-56">
+                        <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                        <input type="text" id="mgrSearchInput" placeholder="상품명, 별칭, ID 검색..." class="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-blue-600 focus:bg-white">
+                    </div>
+                    <select id="mgrFilterSelect" class="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none">
+                        <option value="ALL">전체 등록 상품</option>
+                        <option value="ROCKET">🚀 로켓배송만</option>
+                        <option value="FRESH">🌿 로켓프레시만</option>
+                        <option value="ACTIVE">표시 중인 상품만</option>
+                        <option value="HIDDEN">숨김 처리된 상품만</option>
+                        <option value="STARRED">⭐ 즐겨찾기만</option>
+                    </select>
+                    <button id="btnMgrSaveAll" onclick="saveAllProductManagerRows()" class="inline-flex items-center px-3 py-1.5 text-xs font-extrabold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-2xs transition-all">
+                        <i data-lucide="save" class="w-3.5 h-3.5 mr-1"></i>
+                        <span>전체 수정사항 저장</span>
+                    </button>
+                    <input type="file" id="mgrCsvUploadInput" accept=".csv" class="hidden">
+                    <button id="btnMgrUploadCsv" class="inline-flex items-center px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg transition-all">
+                        <i data-lucide="upload" class="w-3.5 h-3.5 mr-1"></i>
+                        <span>엑셀(CSV) 업로드</span>
+                    </button>
+                    <button id="btnMgrDownloadCsv" class="inline-flex items-center px-2.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-2xs transition-all">
+                        <i data-lucide="download" class="w-3.5 h-3.5 mr-1"></i>
+                        <span>엑셀(CSV) 다운로드</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                <div class="overflow-x-auto max-h-[calc(100vh-220px)]">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="sticky top-0 z-20 bg-slate-100 border-b-2 border-slate-300 text-xs font-extrabold text-slate-700">
+                            <tr>
+                                <th class="py-3 px-2 w-11 text-center">관심</th>
+                                <th class="py-3 px-2 w-14 text-center">썸네일</th>
+                                <th class="py-3 px-3 min-w-[380px] w-[420px]">원본 상품명 / ID / 쿠팡 링크</th>
+                                <th class="py-3 px-2 w-36 min-w-[138px] text-center whitespace-nowrap">배송 구분</th>
+                                <th class="py-3 px-2 w-32">관리용 별칭</th>
+                                <th class="py-3 px-2 w-36">이미지 URL</th>
+                                <th class="py-3 px-2 w-40">쿠팡 판매 페이지 URL</th>
+                                <th class="py-3 px-2 w-24 text-center whitespace-nowrap">개별 리드타임</th>
+                                <th class="py-3 px-2.5 min-w-[140px]">발주/특이사항 메모</th>
+                                <th class="py-3 px-2 w-20 text-center whitespace-nowrap">대시보드</th>
+                                <th class="py-3 px-2 w-24 text-center whitespace-nowrap">저장 / 삭제</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mgrTableBody" class="divide-y divide-slate-200/80 text-xs"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ==================== 상품 상세 분석 팝업 모달 ==================== -->
+    <div id="productDetailModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-3 sm:p-6">
+        <div class="bg-white rounded-2xl max-w-5xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+            <!-- 모달 헤더 -->
+            <div class="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3.5 min-w-0">
+                    <!-- 썸네일 크기 52x52px 엄격 고정 -->
+                    <div id="detailThumbBox" class="w-[52px] h-[52px] min-w-[52px] min-h-[52px] max-w-[52px] max-h-[52px] rounded-xl bg-slate-100 border border-slate-200/80 overflow-hidden shrink-0 flex items-center justify-center"></div>
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <button id="detailIdBadge" type="button" onclick="copyProductId(currentDetailProductId, event)" class="detail-badge font-mono bg-slate-200/90 hover:bg-slate-300 text-slate-700 hover:text-slate-900 border border-slate-300 cursor-pointer transition-colors" title="클릭하여 상품 ID 숫자 복사">ID: -</button>
+                            <span id="detailDeliveryBadge" class="contents"></span>
+                            <span id="detailWinnerBadge" class="contents"></span>
+                            <a id="detailCoupangLink" href="#" target="_blank" class="detail-badge gap-1 bg-blue-600 hover:bg-blue-700 text-white border border-blue-600 transition-colors">
+                                <span>쿠팡 판매 페이지 ↗</span>
+                            </a>
+                        </div>
+                        <h3 id="detailProductName" class="text-base font-extrabold text-slate-900 truncate mt-1.5">상품명</h3>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1.5 shrink-0">
+                    <span id="detailNavPosition" class="text-[11px] font-bold text-slate-400 mr-1 tabular-nums">1 / 1</span>
+                    <button id="btnDetailPrev" onclick="navigateDetailProduct(-1)" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-extrabold transition-colors disabled:opacity-40" title="이전 상품 (키보드 ◀)">◀ 이전</button>
+                    <button id="btnDetailNext" onclick="navigateDetailProduct(1)" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-extrabold transition-colors disabled:opacity-40" title="다음 상품 (키보드 ▶)">다음 ▶</button>
+                    <button onclick="closeProductDetailModal()" class="w-8 h-8 rounded-lg bg-slate-200/70 hover:bg-slate-300 text-slate-700 flex items-center justify-center font-bold text-sm ml-1" title="닫기 (ESC)">✕</button>
+                </div>
+            </div>
+
+            <!-- 모달 바디 -->
+            <div class="p-5 overflow-y-auto space-y-3.5 flex-1">
+
+                <!-- 신규: 판매 이상 진단 배너 (급증 또는 급감일 때만 자동 표시) -->
+                <div id="detailAnomalyBanner" class="hidden rounded-xl px-4 py-3 border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2"></div>
+
+                <!-- 핵심 요약 카드 4개 (모든 텍스트 1줄 whitespace-nowrap 고정) -->
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-stretch">
+                    <div class="lg:col-span-8 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div class="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 flex flex-col justify-between min-w-0">
+                            <div class="text-[11px] font-bold text-slate-500 whitespace-nowrap truncate">현재 재고량</div>
+                            <div id="detailCurrentStock" class="text-lg font-extrabold text-slate-900 mt-1 whitespace-nowrap truncate tabular-nums">-</div>
+                            <div id="detailPrice" class="text-[11px] text-slate-500 mt-0.5 whitespace-nowrap truncate tabular-nums">판매가: -</div>
+                        </div>
+                        <div class="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 flex flex-col justify-between min-w-0">
+                            <div class="text-[11px] font-bold text-slate-500 whitespace-nowrap truncate">일평균 판매 속도</div>
+                            <div id="detailVelocity" class="text-lg font-extrabold text-orange-600 mt-1 whitespace-nowrap truncate tabular-nums">-</div>
+                            <div id="detailSubVelocities" class="text-[11px] text-slate-500 font-medium mt-0.5 whitespace-nowrap truncate tabular-nums">3일 - · 직전7일 - · 전체 -</div>
+                        </div>
+                        <div class="bg-rose-50/70 border border-rose-200 rounded-xl px-3.5 py-2.5 flex flex-col justify-between min-w-0">
+                            <div class="text-[11px] font-bold text-rose-800 whitespace-nowrap truncate">품절 예상 D-Day</div>
+                            <div id="detailDDay" class="text-lg font-extrabold text-rose-600 mt-1 whitespace-nowrap truncate tabular-nums">-</div>
+                            <div id="detailLeadTimeInfo" class="text-[11px] text-rose-700 font-semibold mt-0.5 whitespace-nowrap truncate tabular-nums">리드타임 기준</div>
+                        </div>
+                    </div>
+
+                    <!-- 권장 발주 계산기 (30일 기본) -->
+                    <div class="lg:col-span-4 bg-slate-900 text-white rounded-xl px-4 py-2.5 flex flex-col justify-between min-w-0">
+                        <div class="flex items-center justify-between gap-2 whitespace-nowrap">
+                            <span class="text-xs font-extrabold text-blue-300 flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                <i data-lucide="calculator" class="w-3.5 h-3.5"></i>
+                                권장 발주 계산기
+                            </span>
+                            <div class="flex items-center gap-1 text-xs shrink-0 whitespace-nowrap">
+                                <span class="text-slate-300 text-[11px]">목표</span>
+                                <input type="number" id="orderTargetDaysInput" value="30" min="1" max="365" class="w-12 text-center bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs font-extrabold text-amber-300 focus:outline-none focus:border-blue-400 tabular-nums">
+                                <span class="text-slate-300 text-[11px]">일치</span>
+                            </div>
+                        </div>
+                        <div class="flex items-baseline justify-between gap-2 mt-2 pt-2 border-t border-slate-700/80 whitespace-nowrap">
+                            <span class="text-[11px] text-slate-400 truncate tabular-nums whitespace-nowrap" id="orderCalcFormula">목표 × 일평균 - 재고</span>
+                            <div class="text-right shrink-0 tabular-nums whitespace-nowrap">
+                                <span class="text-[11px] text-slate-300 mr-1">발주량</span>
+                                <span id="orderRecommendQty" class="text-lg font-extrabold text-emerald-400">0개</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 팝업 내 메모 & 개별 리드타임 즉시 수정 바 -->
+                <div class="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 flex-1 min-w-[240px]">
+                        <span class="text-[11px] font-extrabold text-slate-600 whitespace-nowrap">📝 발주 메모</span>
+                        <input type="text" id="detailQuickMemoInput" placeholder="이 상품의 발주처, 입고 예정일, 특이사항을 기록하세요..." class="flex-1 px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <span class="text-[11px] font-extrabold text-slate-600 whitespace-nowrap">⏱️ 개별 리드타임</span>
+                        <input type="number" id="detailQuickLeadInput" min="1" max="120" placeholder="기본" class="w-14 text-center px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-extrabold text-rose-600 focus:outline-none focus:border-blue-500 tabular-nums">
+                        <span class="text-[11px] text-slate-500">일</span>
+                        <button onclick="saveDetailQuickMeta()" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-extrabold transition-colors shadow-2xs whitespace-nowrap">즉시 저장</button>
+                    </div>
+                </div>
+
+                <!-- 기간 필터 + 일자별 재고 & 판매 추이 그래프 -->
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+                        <div class="flex items-center gap-2">
+                            <h4 class="text-xs font-extrabold text-slate-800">📈 일자별 재고량 & 판매 추이</h4>
+                            <span class="text-[11px] text-slate-400">파란선: 보유 재고 • 주황 막대: 일일 판매량</span>
+                        </div>
+                        <!-- 기간 필터 탭 (최근 7일 / 30일 / 전체) -->
+                        <div class="inline-flex items-center bg-white p-0.5 rounded-lg border border-slate-200 text-[11px]">
+                            <button id="detailPeriod_7" onclick="setDetailPeriodFilter(7)" class="px-2.5 py-1 rounded-md font-bold text-slate-600 hover:text-slate-900 transition-all">최근 7일</button>
+                            <button id="detailPeriod_30" onclick="setDetailPeriodFilter(30)" class="px-2.5 py-1 rounded-md font-extrabold bg-blue-600 text-white shadow-2xs transition-all">최근 30일</button>
+                            <button id="detailPeriod_ALL" onclick="setDetailPeriodFilter('ALL')" class="px-2.5 py-1 rounded-md font-bold text-slate-600 hover:text-slate-900 transition-all">전체 기간</button>
+                        </div>
+                    </div>
+                    <div id="detailChartContainer" class="w-full overflow-x-auto"></div>
+                </div>
+
+                <!-- 일자별 상세 기록 표 -->
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="text-xs font-extrabold text-slate-800">📅 일자별 상세 데이터</h4>
+                        <span class="text-[11px] text-blue-600 font-semibold">💡 <b>당시 재고량 숫자</b>를 클릭하면 오타/누락 수량을 직접 보정(✎)할 수 있습니다</span>
+                    </div>
+                    <div class="border border-slate-200 rounded-xl overflow-hidden overflow-x-auto">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead class="bg-slate-100 border-b border-slate-200 text-[11px] font-bold text-slate-600">
+                                <tr>
+                                    <th class="py-2.5 px-3 whitespace-nowrap">날짜</th>
+                                    <th class="py-2.5 px-3 text-right whitespace-nowrap">당시 재고량</th>
+                                    <th class="py-2.5 px-3 text-right whitespace-nowrap">구간 변동 · 판매/입고</th>
+                                    <th class="py-2.5 px-3 text-right whitespace-nowrap">일평균 환산</th>
+                                    <th class="py-2.5 px-3 text-right whitespace-nowrap">판매가</th>
+                                    <th class="py-2.5 px-3 text-center whitespace-nowrap">위너 상태</th>
+                                    <th class="py-2.5 px-3 text-right whitespace-nowrap">노출/검색</th>
+                                    <th class="py-2.5 px-3 text-right whitespace-nowrap">클릭 · CTR</th>
+                                    <th class="py-2.5 px-3 text-right whitespace-nowrap">매출 · 전환율</th>
+                                </tr>
+                            </thead>
+                            <tbody id="detailHistoryTableBody" class="divide-y divide-slate-200/70"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 커스텀 확인 모달 (alert/confirm 미사용) -->
+    <div id="confirmModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200 space-y-4">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                    <i data-lucide="alert-octagon" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h3 id="modalTitle" class="text-base font-bold text-slate-900">확인</h3>
+                    <p id="modalDesc" class="text-xs text-slate-500 mt-0.5">정말 실행하시겠습니까?</p>
+                </div>
+            </div>
+            <div class="flex justify-end space-x-2 pt-2">
+                <button id="modalCancelBtn" class="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors">취소</button>
+                <button id="modalConfirmBtn" class="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 이미지 / 로고 URL 입력 모달 -->
+    <div id="imgUrlModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full p-5 shadow-xl border border-slate-200 space-y-3.5">
+            <div class="flex items-center justify-between">
+                <h3 id="imgModalTitle" class="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                    <i data-lucide="image" class="w-4 h-4 text-blue-600"></i>
+                    <span>상품 이미지 URL 설정</span>
+                </h3>
+                <button id="imgModalCloseBtn" class="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
+            </div>
+            <p id="imgModalProductName" class="text-xs text-slate-500 truncate"></p>
+            <div>
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">이미지 주소 (URL)</label>
+                <input type="url" id="imgModalInput" placeholder="https://..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-blue-600 focus:bg-white">
+                <p id="imgModalHint" class="text-[10px] text-slate-400 mt-1">원하시는 이미지 주소를 붙여넣고 저장하세요. 비우고 저장하면 초기화됩니다.</p>
+            </div>
+            <div class="flex justify-end space-x-2 pt-1">
+                <button id="imgModalCancelBtn" class="px-3.5 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">취소</button>
+                <button id="imgModalSaveBtn" class="px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // PDF.js 워커 설정
+        if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+
+        // LocalStorage 키 (기존 v2 데이터 100% 호환 유지)
+        const DB_STORAGE_KEY = 'coupang_inventory_history_db_v2';
+        const SETTINGS_STORAGE_KEY = 'coupang_inventory_settings_v2';
+        const META_STORAGE_KEY = 'coupang_inventory_product_meta_v2';
+
+        // 민감도 프리셋 정의 (최근 3일 평균 vs 직전 7일 평균)
+        const SENSITIVITY_PRESETS = {
+            SENSITIVE: { label: '민감 (±30%)', surgePct: 30, dropPct: -30 },
+            STANDARD: { label: '표준 (+50%·-40%)', surgePct: 50, dropPct: -40 },
+            CONSERVATIVE: { label: '보수 (+70%·-55%)', surgePct: 70, dropPct: -55 }
+        };
+
+        // 전역 상태
+        let historyDb = { byDate: {} };
+        let productMetaDb = {};
+        let appSettings = { leadTime: 7, basis: 'AVG7', sensitivity: 'STANDARD', headerLogoUrl: '' };
+
+        let currentMainTab = 'DASHBOARD';
+        let currentDeliveryFilter = 'ALL';
+        let currentDetailProductId = null;
+        let detailPeriodFilter = 30; // 7 | 30 | 'ALL'
+        let activeDate = '';
+        let currentAnalyzedList = [];
+        let currentFilteredIds = [];
+        let currentSortKey = 'SEARCH';
+        let currentSortDir = 'desc';
+        let anomalyBriefingDismissedForDate = '';
+        let imgModalMode = 'PRODUCT';
+        let imgModalTargetProductId = null;
+        let confirmCallback = null;
+
+        // DOM & 문자열 헬퍼
+        const $ = (id) => document.getElementById(id);
+        const escHtml = (str) => String(str ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const escCsv = (val) => {
+            const s = String(val ?? '');
+            return (s.includes('"') || s.includes(',') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+        };
+
+        // 알림 토스트 배너
+        function showBanner(message, type = 'info') {
+            const el = $('statusBanner');
+            if (!el) return;
+            const styles = {
+                success: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+                warning: 'bg-amber-50 text-amber-900 border-amber-200',
+                danger: 'bg-rose-50 text-rose-800 border-rose-200',
+                info: 'bg-blue-50 text-blue-800 border-blue-200'
+            };
+            el.className = `rounded-xl px-3.5 py-2 text-xs font-semibold flex items-center justify-between border shadow-xs toast-anim ${styles[type] || styles.info}`;
+            el.innerHTML = `<div class="flex items-center gap-2"><span>${message}</span></div><button onclick="document.getElementById('statusBanner').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 font-bold ml-4">✕</button>`;
+            el.classList.remove('hidden');
+        }
+
+        // 확인 모달
+        function openConfirmModal(title, desc, onConfirm) {
+            $('modalTitle').textContent = title;
+            $('modalDesc').textContent = desc;
+            confirmCallback = onConfirm;
+            const m = $('confirmModal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeConfirmModal() {
+            const m = $('confirmModal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+            confirmCallback = null;
+        }
+
+        // 날짜 유틸리티 (항상 MM/DD(요일) 형식)
+        function getTodayStr() {
+            const now = new Date();
+            return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        }
+
+        function getDaysBetween(dateStr1, dateStr2) {
+            const d1 = new Date(dateStr1 + 'T00:00:00');
+            const d2 = new Date(dateStr2 + 'T00:00:00');
+            return Math.max(1, Math.round((d2.getTime() - d1.getTime()) / 86400000));
+        }
+
+        function getSignedDaysDiff(earlierDateStr, laterDateStr) {
+            const d1 = new Date(earlierDateStr + 'T00:00:00');
+            const d2 = new Date(laterDateStr + 'T00:00:00');
+            return Math.round((d2.getTime() - d1.getTime()) / 86400000);
+        }
+
+        function formatShortDate(dateStr) {
+            if (!dateStr) return '-';
+            const parts = dateStr.split('-');
+            if (parts.length !== 3) return dateStr;
+            const dObj = new Date(dateStr + 'T00:00:00');
+            const weekNames = ['일', '월', '화', '수', '목', '금', '토'];
+            const dayName = !isNaN(dObj.getTime()) ? `(${weekNames[dObj.getDay()]})` : '';
+            return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}${dayName}`;
+        }
+
+        function syncDateLabels(dateStr) {
+            const formatted = formatShortDate(dateStr);
+            if ($('dropZoneDateLabel')) $('dropZoneDateLabel').textContent = formatted;
+            if ($('uploadDateWeekdayBadge')) $('uploadDateWeekdayBadge').textContent = formatted;
+        }
+
+        // LocalStorage 로드/저장 (이전 키 폴백 포함, 기존 데이터 절대 미덮어쓰기)
+        function loadStorage() {
+            try {
+                const rawDb = localStorage.getItem(DB_STORAGE_KEY) || localStorage.getItem('coupang_inventory_history_db_v1');
+                if (rawDb) {
+                    const parsed = JSON.parse(rawDb);
+                    if (parsed && typeof parsed.byDate === 'object') historyDb = parsed;
+                }
+                const rawMeta = localStorage.getItem(META_STORAGE_KEY) || localStorage.getItem('coupang_inventory_product_meta_v1');
+                if (rawMeta) productMetaDb = JSON.parse(rawMeta) || {};
+                const rawSettings = localStorage.getItem(SETTINGS_STORAGE_KEY) || localStorage.getItem('coupang_inventory_settings_v1');
+                if (rawSettings) appSettings = { ...appSettings, ...(JSON.parse(rawSettings) || {}) };
+                if (!SENSITIVITY_PRESETS[appSettings.sensitivity]) appSettings.sensitivity = 'STANDARD';
+            } catch (err) {
+                console.error('로컬스토리지 로드 실패:', err);
+            }
+        }
+
+        function saveDatabase() {
+            try {
+                localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(historyDb));
+            } catch (err) {
+                showBanner('⚠️ 브라우저 저장 공간이 부족합니다. 상단 [JSON 백업]으로 데이터를 백업해 주세요.', 'warning');
+            }
+        }
+
+        function saveProductMeta() {
+            try {
+                localStorage.setItem(META_STORAGE_KEY, JSON.stringify(productMetaDb));
+            } catch (err) {
+                console.error('메타 저장 오류:', err);
+            }
+        }
+
+        function saveSettings() {
+            appSettings.leadTime = Math.max(1, parseInt($('leadTimeInput').value, 10) || 7);
+            appSettings.basis = $('basisSelect').value || 'AVG7';
+            appSettings.sensitivity = $('sensitivitySelect').value || 'STANDARD';
+            try {
+                localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(appSettings));
+            } catch (err) {
+                console.error('설정 저장 오류:', err);
+            }
+        }
+
+        function getProductMeta(productId) {
+            return productMetaDb[productId] || {};
+        }
+
+        function getSortedDates() {
+            return Object.keys(historyDb.byDate || {}).sort();
+        }
+
+        // 상단 로고 슬롯 UI 갱신
+        function updateHeaderLogoUI() {
+            const img = $('headerLogoImg');
+            const ph = $('headerLogoPlaceholder');
+            const slot = $('headerLogoSlot');
+            const url = (appSettings.headerLogoUrl || '').trim();
+            if (url) {
+                img.src = url;
+                img.classList.remove('hidden');
+                ph.classList.add('hidden');
+                slot.classList.remove('border-dashed', 'border-slate-300', 'bg-slate-50', 'px-2.5');
+                slot.classList.add('border-transparent', 'bg-transparent', 'px-0.5');
+            } else {
+                img.src = '';
+                img.classList.add('hidden');
+                ph.classList.remove('hidden');
+                slot.classList.add('border-dashed', 'border-slate-300', 'bg-slate-50', 'px-2.5');
+                slot.classList.remove('border-transparent', 'bg-transparent', 'px-0.5');
+            }
+        }
+
+        window.openHeaderLogoModal = function() {
+            imgModalMode = 'HEADER_LOGO';
+            imgModalTargetProductId = null;
+            $('imgModalTitle').innerHTML = `<i data-lucide="image-plus" class="w-4 h-4 text-blue-600"></i><span>상단 브랜드 로고 URL 설정</span>`;
+            $('imgModalProductName').textContent = '프로그램명 왼쪽에 표시할 쿠팡 로고 이미지 URL을 입력하세요.';
+            $('imgModalInput').value = appSettings.headerLogoUrl || '';
+            $('imgModalHint').textContent = '로고 이미지 주소(PNG/SVG/JPG)를 붙여넣으세요. 비우고 저장하면 기본 슬롯으로 돌아갑니다.';
+            const m = $('imgUrlModal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+            lucide.createIcons();
+            setTimeout(() => $('imgModalInput').focus(), 50);
+        };
+
+        window.openImageUrlModal = function(productId, productName, currentUrl, event) {
+            if (event) event.stopPropagation();
+            imgModalMode = 'PRODUCT';
+            imgModalTargetProductId = productId;
+            $('imgModalTitle').innerHTML = `<i data-lucide="image" class="w-4 h-4 text-blue-600"></i><span>상품 이미지 URL 설정</span>`;
+            $('imgModalProductName').textContent = `[ID: ${productId}] ${productName}`;
+            $('imgModalInput').value = currentUrl || '';
+            $('imgModalHint').textContent = '등록된 이미지 주소는 모든 누적 날짜의 동일 상품에 자동 연동됩니다.';
+            const m = $('imgUrlModal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+            lucide.createIcons();
+            setTimeout(() => $('imgModalInput').focus(), 50);
+        };
+
+        function closeImageUrlModal() {
+            const m = $('imgUrlModal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+            imgModalTargetProductId = null;
+        }
+
+        // 메인 탭 전환
+        window.switchMainTab = function(tabName) {
+            currentMainTab = tabName;
+            const isDash = (tabName === 'DASHBOARD');
+            $('dashboardView').classList.toggle('hidden', !isDash);
+            $('productManagerView').classList.toggle('hidden', isDash);
+            $('tabBtnDashboard').className = isDash
+                ? 'px-3 py-1 text-xs font-extrabold rounded-lg bg-white text-blue-600 shadow-2xs transition-all flex items-center gap-1.5 whitespace-nowrap'
+                : 'px-3 py-1 text-xs font-bold rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5 whitespace-nowrap';
+            $('tabBtnManager').className = !isDash
+                ? 'px-3 py-1 text-xs font-extrabold rounded-lg bg-white text-blue-600 shadow-2xs transition-all flex items-center gap-1.5 whitespace-nowrap'
+                : 'px-3 py-1 text-xs font-bold rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5 whitespace-nowrap';
+            if (!isDash) renderProductManagerTable();
+            lucide.createIcons();
+        };
+
+        // 정렬 토글
+        window.toggleColumnSort = function(colKey) {
+            if (currentSortKey === colKey) {
+                currentSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSortKey = colKey;
+                currentSortDir = ['DDAY', 'STOCK', 'NAME'].includes(colKey) ? 'asc' : 'desc';
+            }
+            updateSortIconsUI();
+            refreshAllUI();
+        };
+
+        function updateSortIconsUI() {
+            ['NAME', 'PRICE', 'STOCK', 'AVG_SALES', 'DDAY', 'SEARCH', 'GMV'].forEach(k => {
+                const el = $(`sortIcon_${k}`);
+                if (!el) return;
+                const isCurr = (k === currentSortKey);
+                el.textContent = isCurr ? (currentSortDir === 'asc' ? '▲' : '▼') : '↕';
+                el.className = isCurr ? 'text-blue-600 font-extrabold text-xs' : 'text-slate-400 text-[11px]';
+            });
+        }
+
+        // 검색창 클리어
+        window.clearSearchInput = function() {
+            $('searchInput').value = '';
+            $('btnClearSearch').classList.add('hidden');
+            refreshAllUI();
+        };
+
+        // KPI 카드 및 이상 칩 필터 토글
+        window.toggleKpiCardFilter = function(targetFilter) {
+            const sel = $('filterSelect');
+            if (!sel) return;
+            sel.value = (targetFilter === 'ALL' || sel.value === targetFilter) ? 'ALL' : targetFilter;
+            refreshAllUI();
+        };
+
+        window.applyAnomalyBriefingFilter = function(type) {
+            $('filterSelect').value = type;
+            refreshAllUI();
+        };
+
+        window.dismissAnomalyBriefing = function() {
+            anomalyBriefingDismissedForDate = activeDate;
+            $('anomalyBriefingBanner').classList.add('hidden');
+        };
+
+        function updateKpiAndChipHighlights() {
+            const val = $('filterSelect').value;
+            const map = {
+                ALL: 'kpiCardAll',
+                URGENT_ORDER: 'kpiCardUrgent',
+                NOT_WINNER: 'kpiCardNotWinner',
+                RESTOCKED: 'kpiCardRestocked',
+                ANOMALY_ALL: 'kpiCardAnomaly'
+            };
+            Object.entries(map).forEach(([filterKey, cardId]) => {
+                const el = $(cardId);
+                if (!el) return;
+                const isActive = (val === filterKey && filterKey !== 'ALL') || (filterKey === 'ANOMALY_ALL' && (val === 'SURGE' || val === 'DROP'));
+                el.classList.toggle('ring-2', isActive);
+                el.classList.toggle('ring-blue-500', isActive);
+                el.classList.toggle('ring-offset-1', isActive);
+            });
+
+            // 급증 / 급감 칩 활성 스타일
+            const surgeChip = $('chipFilterSurge');
+            const dropChip = $('chipFilterDrop');
+            if (surgeChip) {
+                surgeChip.className = val === 'SURGE'
+                    ? 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold border border-orange-600 bg-orange-600 text-white shadow-2xs transition-all whitespace-nowrap'
+                    : 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold border border-orange-200 bg-orange-50/70 text-orange-700 hover:bg-orange-100 transition-all whitespace-nowrap';
+            }
+            if (dropChip) {
+                dropChip.className = val === 'DROP'
+                    ? 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold border border-indigo-600 bg-indigo-600 text-white shadow-2xs transition-all whitespace-nowrap'
+                    : 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold border border-indigo-200 bg-indigo-50/70 text-indigo-700 hover:bg-indigo-100 transition-all whitespace-nowrap';
+            }
+        }
+
+        // 배송유형 필터
+        window.setDeliveryTypeFilter = function(type) {
+            currentDeliveryFilter = type;
+            const activeMap = {
+                ALL: 'bg-white text-slate-800',
+                ROCKET: 'bg-sky-600 text-white',
+                FRESH: 'bg-emerald-600 text-white'
+            };
+            ['ALL', 'ROCKET', 'FRESH'].forEach(k => {
+                const el = $(`shipTab_${k}`);
+                if (!el) return;
+                el.className = (k === type)
+                    ? `px-2 py-1 rounded-md font-extrabold shadow-2xs transition-all ${activeMap[k]}`
+                    : 'px-2 py-1 rounded-md font-bold text-slate-600 hover:text-slate-900 transition-all';
+            });
+            refreshAllUI();
+        };
+
+        function getDeliveryBadgeHtml(deliveryType, compact = false) {
+            const isFresh = (deliveryType === 'FRESH' || deliveryType === '로켓프레시');
+            const isRocket = (deliveryType === 'ROCKET' || deliveryType === '로켓배송');
+            if (isFresh) {
+                return compact
+                    ? `<span class="uniform-badge bg-emerald-100 text-emerald-800 border border-emerald-300">🌿 프레시</span>`
+                    : `<span class="detail-badge bg-emerald-100 text-emerald-800 border border-emerald-300">🌿 로켓프레시</span>`;
+            }
+            if (isRocket) {
+                return compact
+                    ? `<span class="uniform-badge bg-sky-100 text-sky-800 border border-sky-300">🚀 로켓</span>`
+                    : `<span class="detail-badge bg-sky-100 text-sky-800 border border-sky-300">🚀 로켓배송</span>`;
+            }
+            return compact ? `<span class="uniform-badge bg-slate-100 text-slate-400 border border-slate-200">미지정</span>` : '';
+        }
+
+        // 안전한 클립보드 복사 (iFrame 호환 execCommand)
+        function copyTextToClipboard(text) {
+            const temp = document.createElement('textarea');
+            temp.value = text;
+            temp.style.position = 'fixed';
+            temp.style.opacity = '0';
+            document.body.appendChild(temp);
+            temp.focus();
+            temp.select();
+            document.execCommand('copy');
+            document.body.removeChild(temp);
+        }
+
+        // 상품 ID 순수 숫자 클립보드 복사
+        window.copyProductId = function(productId, event) {
+            if (event) event.stopPropagation();
+            if (!productId) return;
+            const cleanId = String(productId).replace(/[^0-9]/g, '') || String(productId).trim();
+            copyTextToClipboard(cleanId);
+            showBanner(`📋 상품 ID [${cleanId}]가 클립보드에 복사되었습니다.`, 'info');
+        };
+
+        // 발주 필요 목록 원클릭 클립보드 복사 (30일 기준)
+        window.copyUrgentOrderSummary = function() {
+            const urgentItems = currentAnalyzedList.filter(p => p.analysis.isUrgent || p.stock === 0);
+            if (!urgentItems.length) {
+                showBanner('✅ 현재 발주 시급 또는 품절 상품이 없습니다.', 'info');
+                return;
+            }
+            const targetDays = 30;
+            const lines = [`[쿠팡 발주 필요 목록 - 기준일: ${formatShortDate(activeDate)} (${targetDays}일 재고 목표)]`];
+            urgentItems.forEach((p, i) => {
+                const avg = p.analysis.activeAvg || 0;
+                const stock = p.stock ?? 0;
+                const recQty = avg > 0 ? Math.max(0, Math.ceil(avg * targetDays - stock)) : 0;
+                const deliv = p.deliveryType === 'FRESH' ? '[로켓프레시] ' : (p.deliveryType === 'ROCKET' ? '[로켓배송] ' : '');
+                const ddayLabel = stock === 0 ? '품절' : (p.analysis.daysLeft !== null ? `D-${Math.floor(p.analysis.daysLeft)}` : '-');
+                lines.push(`${i + 1}. ${deliv}${p.displayName} (ID:${p.id}) | 현재재고: ${stock}개 | 일평균: ${avg.toFixed(1)}개 | ${ddayLabel} | 30일 권장발주: ${recQty}개`);
+            });
+            copyTextToClipboard(lines.join('\n'));
+            showBanner(`📋 발주 시급/품절 ${urgentItems.length}개 상품의 권장 발주 목록이 클립보드에 복사되었습니다!`, 'success');
+        };
+
+        // ============================================================
+        // 1. 쿠팡 광고센터 HTML / PDF 파서 (2가지 탭 완벽 호환)
+        // ============================================================
+        function parseCoupangHtml(htmlString) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlString, 'text/html');
+            const rowMap = new Map();
+
+            const rows = doc.querySelectorAll('.ag-row[row-id]');
+            rows.forEach(row => {
+                const rowId = row.getAttribute('row-id');
+                if (!rowId) return;
+                if (!rowMap.has(rowId)) {
+                    rowMap.set(rowId, {
+                        id: rowId,
+                        extractedId: '',
+                        name: '',
+                        url: '',
+                        imageUrl: '',
+                        price: 0,
+                        stock: null,
+                        winner: '-',
+                        searchCount: 0,
+                        clicks: 0,
+                        ctr: '-',
+                        cvr: '-',
+                        gmv: 0,
+                        cartCount: 0
+                    });
+                }
+                const item = rowMap.get(rowId);
+
+                // 좌측 상품 셀: 'Product'(광고하지 않는 상품) 또는 'vendorItem'(광고 중인 상품)
+                const productCell = row.querySelector('[col-id="Product"], [col-id="vendorItem"]');
+                if (productCell) {
+                    const linkEl = productCell.querySelector('a[href*="coupang.com/vp/products"], a[href*="coupang.com"]');
+                    if (linkEl) item.url = (linkEl.getAttribute('href') || '').trim();
+
+                    const imgEl = productCell.querySelector('img[alt]:not([alt=""])') || productCell.querySelector('.sc-1um25cb-2 img');
+                    if (imgEl) {
+                        const rawSrc = (imgEl.getAttribute('src') || '').trim();
+                        if (/^https?:\/\//i.test(rawSrc)) item.imageUrl = rawSrc;
+                    }
+
+                    const titleEl = productCell.querySelector('.sc-1um25cb-4') || productCell.querySelector('[title]');
+                    const extractedName = (titleEl ? titleEl.textContent.trim() : '') || (imgEl ? (imgEl.getAttribute('alt') || '').trim() : '');
+                    if (extractedName) item.name = extractedName;
+
+                    const fullText = productCell.textContent || '';
+
+                    // 상품 ID 추출
+                    const idMatch = fullText.match(/ID:\s*(\d{7,15})/);
+                    if (idMatch) item.extractedId = idMatch[1];
+
+                    // 판매가 추출
+                    const priceMatch = fullText.match(/([\d,]+)원/);
+                    if (priceMatch) item.price = parseInt(priceMatch[1].replace(/,/g, ''), 10) || 0;
+
+                    // 재고량 추출 ('품절' -> 0)
+                    const stockMatch = fullText.match(/재고량:\s*([\d,]+개|품절)/);
+                    if (stockMatch) {
+                        item.stock = stockMatch[1] === '품절' ? 0 : parseInt(stockMatch[1].replace(/[^0-9]/g, ''), 10);
+                    }
+
+                    // 아이템 위너 추출
+                    const winnerMatch = fullText.match(/아이템\s*위너:\s*(선정|미선정)/);
+                    if (winnerMatch) item.winner = winnerMatch[1];
+                }
+
+                // 우측 성과 지표 셀 (두 탭 col-id 완벽 매핑)
+                const getCellText = (colIds) => {
+                    for (const cid of colIds) {
+                        const cell = row.querySelector(`[col-id="${cid}"] .sc-1pr2blv-5`) || row.querySelector(`[col-id="${cid}"]`);
+                        if (cell) {
+                            const txt = cell.textContent.trim();
+                            if (txt) return txt;
+                        }
+                    }
+                    return '';
+                };
+
+                const searchStr = getCellText(['SearchCount', 'AdImpressions']);
+                if (searchStr) {
+                    const m = searchStr.match(/([\d,]+)회/);
+                    item.searchCount = m ? parseInt(m[1].replace(/,/g, ''), 10) : (parseInt(searchStr.replace(/[^0-9]/g, ''), 10) || 0);
+                }
+
+                const clickStr = getCellText(['Clicks', 'AdClicks']);
+                if (clickStr) {
+                    const m = clickStr.match(/([\d,]+)회/);
+                    item.clicks = m ? parseInt(m[1].replace(/,/g, ''), 10) : (parseInt(clickStr.replace(/[^0-9]/g, ''), 10) || 0);
+                }
+
+                const ctrStr = getCellText(['CTR', 'AdCtr']);
+                if (ctrStr) {
+                    const m = ctrStr.match(/([\d.]+%)/);
+                    if (m) item.ctr = m[1];
+                }
+
+                const cvrStr = getCellText(['CVR', 'AdCvr']);
+                if (cvrStr) {
+                    const m = cvrStr.match(/([\d.]+%)/);
+                    if (m) item.cvr = m[1];
+                }
+
+                const gmvStr = getCellText(['TotalGMV', 'AdConversionRevenue']);
+                if (gmvStr) {
+                    const m = gmvStr.match(/([\d,]+)원/);
+                    item.gmv = m ? parseInt(m[1].replace(/,/g, ''), 10) : (parseInt(gmvStr.replace(/[^0-9]/g, ''), 10) || 0);
+                }
+
+                const cartStr = getCellText(['CartCount']);
+                if (cartStr) {
+                    const m = cartStr.match(/([\d,]+)회/);
+                    item.cartCount = m ? parseInt(m[1].replace(/,/g, ''), 10) : (parseInt(cartStr.replace(/[^0-9]/g, ''), 10) || 0);
+                }
+            });
+
+            const finalMap = new Map();
+            rowMap.forEach(item => {
+                if (!item.name) return;
+                const finalId = item.extractedId || item.id;
+                finalMap.set(finalId, {
+                    id: finalId,
+                    name: item.name,
+                    url: item.url || '',
+                    imageUrl: item.imageUrl || '',
+                    price: item.price,
+                    stock: item.stock,
+                    winner: item.winner,
+                    searchCount: item.searchCount,
+                    clicks: item.clicks,
+                    ctr: item.ctr,
+                    cvr: item.cvr,
+                    gmv: item.gmv,
+                    cartCount: item.cartCount
+                });
+            });
+            return Array.from(finalMap.values());
+        }
+
+        // PDF 텍스트 파싱 (pdf.js 우선, 실패 시 텍스트 폴백)
+        async function parseCoupangPdf(arrayBuffer) {
+            let fullText = '';
+            try {
+                if (typeof pdfjsLib !== 'undefined') {
+                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        fullText += textContent.items.map(it => it.str).join(' ') + '\n';
+                    }
+                } else {
+                    fullText = new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
+                }
+            } catch (err) {
+                console.warn('PDF.js 파싱 폴백 실행:', err);
+                fullText = new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
+            }
+
+            const results = [];
+            const regex = /([가-힣a-zA-Z0-9\s,()_\-+.*xX]+?)\s*(?:[\d,]+회\s*)?(?:[+-]?[\d.]+%\s*)?ID:\s*(\d{7,15})\s*([\d,]+)원/g;
+            let match;
+            while ((match = regex.exec(fullText)) !== null) {
+                let rawName = match[1].trim();
+                const splitParts = rawName.split(/광고효율\s*UP|선택한 상품:\s*\d+개|판매자 사이트|애즈 홈페이지|마이샵/);
+                rawName = splitParts[splitParts.length - 1].trim().replace(/^\d+회\s*/, '').replace(/^[+-]?[\d.]+%\s*/, '').trim();
+                const id = match[2];
+                const price = parseInt(match[3].replace(/,/g, ''), 10) || 0;
+                const surrounding = fullText.substring(Math.max(0, match.index - 100), Math.min(fullText.length, match.index + 250));
+                const stockMatch = surrounding.match(/(?:재고량|채고향)[:\s]*([\d,]+개|품절)/);
+                let stock = null;
+                if (stockMatch) stock = stockMatch[1] === '품절' ? 0 : parseInt(stockMatch[1].replace(/[^0-9]/g, ''), 10);
+                const winnerMatch = surrounding.match(/아이템\s*위너:\s*(선정|미선정)/);
+                results.push({
+                    id, name: rawName || `상품 ID ${id}`, url: '', imageUrl: '', price, stock,
+                    winner: winnerMatch ? winnerMatch[1] : '-',
+                    searchCount: 0, clicks: 0, ctr: '-', cvr: '-', gmv: 0, cartCount: 0
+                });
+            }
+            return results;
+        }
+
+        // 파일 업로드 및 날짜별 합산 병합
+        async function handleFileUpload(files) {
+            const targetDate = $('uploadDateInput').value || getTodayStr();
+            let allExtractedItems = [];
+            const uploadedFileNames = [];
+            let hasPdfWarning = false;
+
+            for (const file of files) {
+                const ext = file.name.split('.').pop().toLowerCase();
+                uploadedFileNames.push(file.name);
+                try {
+                    if (ext === 'html' || ext === 'htm') {
+                        const text = await file.text();
+                        allExtractedItems = allExtractedItems.concat(parseCoupangHtml(text));
+                    } else if (ext === 'pdf') {
+                        const buf = await file.arrayBuffer();
+                        const items = await parseCoupangPdf(buf);
+                        allExtractedItems = allExtractedItems.concat(items);
+                        const missingStock = items.filter(it => it.stock === null).length;
+                        if (items.length > 0 && missingStock > items.length * 0.5) hasPdfWarning = true;
+                    }
+                } catch (err) {
+                    console.error(`파일 파싱 오류 (${file.name}):`, err);
+                }
+            }
+
+            if (allExtractedItems.length === 0) {
+                showBanner('❗ 업로드한 파일에서 쿠팡 상품 데이터를 찾지 못했습니다. 쿠팡 광고센터 [상품 기회 탐색] 화면을 저장한 HTML/PDF 파일인지 확인해 주세요.', 'warning');
+                return;
+            }
+
+            // 기존 데이터가 모두 샘플 전용이었다면 실제 파일 업로드 시 교체
+            const existingDates = getSortedDates();
+            const isAllSample = existingDates.length > 0 && existingDates.every(d => historyDb.byDate[d]?.isSample);
+            if (isAllSample) {
+                historyDb = { byDate: {} };
+            }
+
+            if (!historyDb.byDate[targetDate] || historyDb.byDate[targetDate].isSample) {
+                historyDb.byDate[targetDate] = { items: {}, files: [], updatedAt: '' };
+            }
+            const dayRecord = historyDb.byDate[targetDate];
+
+            allExtractedItems.forEach(item => {
+                const prev = dayRecord.items[item.id] || {};
+                const meta = productMetaDb[item.id] || {};
+                const resolvedImg = meta.imageUrl || prev.imageUrl || item.imageUrl || '';
+                const resolvedUrl = item.url || prev.url || '';
+
+                dayRecord.items[item.id] = {
+                    ...prev,
+                    ...item,
+                    name: item.name || prev.name,
+                    url: resolvedUrl,
+                    imageUrl: resolvedImg,
+                    price: item.price || prev.price,
+                    stock: item.stock !== null ? item.stock : (prev.stock ?? null),
+                    winner: item.winner !== '-' ? item.winner : (prev.winner || '-'),
+                    searchCount: item.searchCount || prev.searchCount || 0,
+                    clicks: item.clicks || prev.clicks || 0,
+                    ctr: item.ctr !== '-' ? item.ctr : (prev.ctr || '-'),
+                    cvr: item.cvr !== '-' ? item.cvr : (prev.cvr || '-'),
+                    gmv: item.gmv || prev.gmv || 0
+                };
+
+                // 신규 상품이거나 판매 페이지 링크가 비어 있는 경우에만 자동 저장 (사용자 수정 URL 보존)
+                if (resolvedUrl) {
+                    if (!productMetaDb[item.id]) productMetaDb[item.id] = {};
+                    if (!productMetaDb[item.id].customUrl || !productMetaDb[item.id].customUrl.trim()) {
+                        productMetaDb[item.id].customUrl = resolvedUrl;
+                    }
+                }
+                if (item.imageUrl) {
+                    if (!productMetaDb[item.id]) productMetaDb[item.id] = {};
+                    if (!productMetaDb[item.id].imageUrl || !productMetaDb[item.id].imageUrl.trim()) {
+                        productMetaDb[item.id].imageUrl = item.imageUrl;
+                    }
+                }
+            });
+
+            const now = new Date();
+            dayRecord.updatedAt = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            dayRecord.files = Array.from(new Set([...(dayRecord.files || []), ...uploadedFileNames]));
+            delete dayRecord.isSample;
+
+            activeDate = targetDate;
+            anomalyBriefingDismissedForDate = ''; // 새 파일 업로드 시 이상 브리핑 배너 자동 노출
+            $('uploadDateInput').value = targetDate;
+            syncDateLabels(targetDate);
+            saveProductMeta();
+            saveDatabase();
+            refreshAllUI();
+
+            const totalDayItems = Object.keys(dayRecord.items).length;
+            if (hasPdfWarning) {
+                showBanner(`⚠️ [${formatShortDate(targetDate)}] ${totalDayItems}개 상품 합산 완료 (일부 PDF 재고량 누락 → HTML 저장 권장)`, 'warning');
+            } else {
+                showBanner(`✅ [${formatShortDate(targetDate)}] ${uploadedFileNames.length}개 파일 합산 완료! 총 ${totalDayItems}개 상품이 저장되었습니다.`, 'success');
+            }
+            $('fileInput').value = '';
+        }
+
+        // ============================================================
+        // 2. 핵심 분석 엔진 (입고/결측일 보정 + 3일 vs 직전 7일 이상감지)
+        // ============================================================
+        function analyzeProductHistory(productId, targetDate, datesUpToActive, leadTimeDays, basisType, sensitivityKey) {
+            const timeline = [];
+            datesUpToActive.forEach(dateStr => {
+                const rec = historyDb.byDate[dateStr]?.items?.[productId];
+                if (rec && rec.stock !== null && rec.stock !== undefined) {
+                    timeline.push({ date: dateStr, stock: rec.stock, price: rec.price || 0, raw: rec });
+                }
+            });
+
+            const segments = [];
+            const dailySlots = []; // { offsetFromTarget, rate } (비입고 유효 판매 구간만 일별 전개)
+            let restockCount = 0;
+            let lastRestockQty = 0;
+
+            for (let i = 1; i < timeline.length; i++) {
+                const prev = timeline[i - 1];
+                const curr = timeline[i];
+                const daysDiff = getDaysBetween(prev.date, curr.date);
+                const stockDelta = prev.stock - curr.stock; // 양수=판매, 음수=입고
+
+                if (stockDelta < 0) {
+                    const restockQty = Math.abs(stockDelta);
+                    restockCount++;
+                    lastRestockQty = restockQty;
+                    segments.push({
+                        fromDate: prev.date,
+                        toDate: curr.date,
+                        daysDiff,
+                        soldQty: 0,
+                        restockQty,
+                        dailyRate: null,
+                        isRestock: true
+                    });
+                } else {
+                    const dailyRate = stockDelta / daysDiff;
+                    segments.push({
+                        fromDate: prev.date,
+                        toDate: curr.date,
+                        daysDiff,
+                        soldQty: stockDelta,
+                        restockQty: 0,
+                        dailyRate,
+                        isRestock: false
+                    });
+
+                    // 결측일(주말 등)을 일할 분배하여 정확한 날짜 오프셋 슬롯으로 기록
+                    const endOffset = Math.max(0, getSignedDaysDiff(curr.date, targetDate));
+                    for (let k = 0; k < daysDiff; k++) {
+                        dailySlots.push({ offset: endOffset + k, rate: dailyRate });
+                    }
+                }
+            }
+
+            // 구간별 평균 계산 헬퍼 (minOffset <= offset <= maxOffset)
+            const calcSlotAvg = (minOffset, maxOffset) => {
+                let sum = 0, cnt = 0;
+                dailySlots.forEach(slot => {
+                    if (slot.offset >= minOffset && (maxOffset === null || slot.offset <= maxOffset)) {
+                        sum += slot.rate;
+                        cnt++;
+                    }
+                });
+                return cnt > 0 ? { avg: sum / cnt, days: cnt } : { avg: null, days: 0 };
+            };
+
+            const w3 = calcSlotAvg(0, 2);       // 최근 3일 구간 (오프셋 0, 1, 2)
+            const w7 = calcSlotAvg(0, 6);       // 최근 7일 구간 (오프셋 0~6)
+            const wAll = calcSlotAvg(0, null);  // 전체 누적 구간
+
+            // 기준선(직전 7일): 최근 3일 직전의 7일 구간 (오프셋 3~9)
+            // 직전 7일 데이터가 부족하면 최근 3일 이전 가용 전체(오프셋 3~∞) -> 최후 폴백으로 전체 평균 사용
+            let baseWindow = calcSlotAvg(3, 9);
+            let baseSourceLabel = '직전 7일';
+            if (baseWindow.days === 0) {
+                baseWindow = calcSlotAvg(3, null);
+                baseSourceLabel = '이전 기간';
+            }
+
+            const avg3 = w3.avg;
+            const avg7 = w7.avg;
+            const avgAll = wAll.avg;
+            const baseAvg7 = baseWindow.avg;
+
+            // 메인 표시 속도
+            let activeAvg = avg7;
+            if (basisType === 'AVG3') activeAvg = avg3 ?? avg7 ?? avgAll;
+            else if (basisType === 'AVG_ALL') activeAvg = avgAll;
+            else activeAvg = avg7 ?? avgAll;
+
+            const currentItem = historyDb.byDate[targetDate]?.items?.[productId];
+            const currentStock = currentItem?.stock ?? null;
+            const latestSegment = segments.length > 0 ? segments[segments.length - 1] : null;
+            const isRecentRestock = !!(latestSegment && latestSegment.isRestock);
+
+            // 직전 대비 판매가 및 노출량 변동 추적 (급감 원인 단서 및 판매가 변동 표시용)
+            let prevPrice = null;
+            let priceDiff = 0;
+            let prevSearchCount = null;
+            if (timeline.length >= 2) {
+                for (let i = timeline.length - 2; i >= 0; i--) {
+                    if (timeline[i].price > 0) {
+                        prevPrice = timeline[i].price;
+                        break;
+                    }
+                }
+                if (prevPrice !== null && currentItem?.price > 0) {
+                    priceDiff = currentItem.price - prevPrice;
+                }
+                const prevRaw = timeline[timeline.length - 2].raw;
+                if (prevRaw && prevRaw.searchCount > 0) {
+                    prevSearchCount = prevRaw.searchCount;
+                }
+            }
+
+            // ============================================================
+            // 판매량 급증·급감 자동 감지 (최근 3일 평균 vs 직전 7일 평균 · 안정형)
+            // ============================================================
+            const preset = SENSITIVITY_PRESETS[sensitivityKey] || SENSITIVITY_PRESETS.STANDARD;
+            let anomalyType = 'NONE'; // 'SURGE' | 'DROP' | 'NONE'
+            let anomalyPct = null;
+            let anomalyClues = [];
+            let shortDaysLeft = null;
+
+            // 최소 3개 이상 날짜 스냅샷 누적 + 최근 3일 구간에 유효 판매 데이터 존재 + 비교 기준선 존재
+            const hasEnoughHistory = timeline.length >= 3 && w3.days > 0 && baseWindow.days > 0;
+            if (hasEnoughHistory && avg3 !== null && baseAvg7 !== null) {
+                const absDiff = Math.abs(avg3 - baseAvg7);
+
+                if (baseAvg7 > 0) {
+                    const pct = ((avg3 - baseAvg7) / baseAvg7) * 100;
+                    // 소량 노이즈 차단: 절대 변화량 >= 3개 OR 기준선 >= 3개이면서 유의미한 변화(임계치 돌파)
+                    const passesNoiseGuard = (absDiff >= 3) || (baseAvg7 >= 3);
+
+                    if (passesNoiseGuard && pct >= preset.surgePct) {
+                        anomalyType = 'SURGE';
+                        anomalyPct = pct;
+                    } else if (passesNoiseGuard && pct <= preset.dropPct) {
+                        // 현재 재고 0개(품절) 상품은 '판매 급감'에서 자동 제외
+                        if (currentStock !== 0) {
+                            anomalyType = 'DROP';
+                            anomalyPct = pct;
+                        }
+                    }
+                } else if (baseAvg7 === 0 && avg3 >= 3) {
+                    // 평소 0개 판매에서 최근 3일 일평균 3개 이상 급등
+                    anomalyType = 'SURGE';
+                    anomalyPct = 100;
+                }
+            }
+
+            // 급증 시 단기 속도 기준 품절 예상 D-Day 계산
+            if (anomalyType === 'SURGE' && currentStock !== null && currentStock > 0 && avg3 > 0) {
+                shortDaysLeft = currentStock / avg3;
+            }
+
+            // 급감 시 원인 단서 자동 매칭
+            if (anomalyType === 'DROP') {
+                if (currentItem?.winner === '미선정') {
+                    anomalyClues.push('⚠️ 아이템 위너 미선정 상태');
+                }
+                if (priceDiff > 0) {
+                    anomalyClues.push(`💰 직전 대비 판매가 인상 (+${priceDiff.toLocaleString()}원)`);
+                }
+                if (prevSearchCount && currentItem?.searchCount >= 0) {
+                    const sDrop = ((currentItem.searchCount - prevSearchCount) / prevSearchCount) * 100;
+                    if (sDrop <= -25) {
+                        anomalyClues.push(`👁️ 노출/검색량 하락 (${Math.round(sDrop)}%)`);
+                    }
+                }
+                if (anomalyClues.length === 0) {
+                    anomalyClues.push('🔍 경쟁사 가격 변동·리뷰·광고 예산 소진 점검 권장');
+                }
+            }
+
+            // 품절 예상 D-Day 계산
+            let daysLeft = null;
+            let isUrgent = false;
+            if (currentStock === 0) {
+                daysLeft = 0;
+                isUrgent = true;
+            } else if (currentStock !== null && activeAvg !== null && activeAvg > 0) {
+                daysLeft = currentStock / activeAvg;
+                if (daysLeft <= leadTimeDays) isUrgent = true;
+            }
+
+            return {
+                timeline,
+                segments,
+                latestSegment,
+                avg3,
+                avg7,
+                avgAll,
+                baseAvg7,
+                baseSourceLabel,
+                activeAvg,
+                daysLeft,
+                shortDaysLeft,
+                isUrgent,
+                leadTimeDays,
+                restockCount,
+                lastRestockQty,
+                isRecentRestock,
+                priceDiff,
+                prevPrice,
+                anomalyType,
+                anomalyPct,
+                anomalyClues
+            };
+        }
+
+        // 미니 SVG 스파크라인 (최대 14일 재고 추이)
+        function buildMiniSparkline(timeline) {
+            const pts = timeline.slice(-14);
+            if (pts.length < 2) return `<span class="text-[10px] text-slate-300">추세 대기</span>`;
+            const w = 124, h = 22, pad = 3;
+            const vals = pts.map(p => p.stock);
+            const minV = Math.min(...vals);
+            const maxV = Math.max(...vals);
+            const span = Math.max(1, maxV - minV);
+            const coords = pts.map((p, idx) => {
+                const x = pad + (idx / (pts.length - 1)) * (w - pad * 2);
+                const y = h - pad - ((p.stock - minV) / span) * (h - pad * 2);
+                return { x, y };
+            });
+            const polyPoints = coords.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+            const isUp = vals[vals.length - 1] > vals[0];
+            const strokeColor = isUp ? '#2563eb' : (vals[vals.length - 1] === 0 ? '#e11d48' : '#0284c7');
+            const last = coords[coords.length - 1];
+            return `
+                <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="overflow-visible block">
+                    <polyline fill="none" stroke="${strokeColor}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" points="${polyPoints}"></polyline>
+                    <circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2.5" fill="${strokeColor}"></circle>
+                </svg>
+            `;
+        }
+
+        // ============================================================
+        // 3. 누적일 타임라인 (최근 5일 칩 + 개별 삭제 × + 5일 초과 드롭다운)
+        // ============================================================
+        function renderDateTimeline(sortedDates) {
+            const container = $('datePillsContainer');
+            $('dbCountBadge').textContent = `${sortedDates.length}일`;
+
+            if (sortedDates.length === 0) {
+                container.innerHTML = `<span class="text-xs text-slate-400">저장된 날짜 없음</span>`;
+                return;
+            }
+
+            let html = '';
+            // 5일 초과 시 전체 날짜 빠른 이동 드롭다운 제공
+            if (sortedDates.length > 5) {
+                const opts = [...sortedDates].reverse().map(d => {
+                    const cnt = Object.keys(historyDb.byDate[d]?.items || {}).length;
+                    return `<option value="${d}" ${d === activeDate ? 'selected' : ''}>${formatShortDate(d)} (${cnt}개)</option>`;
+                }).join('');
+                html += `<select onchange="selectActiveDate(this.value)" class="bg-slate-100 border border-slate-300 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none mr-1 shrink-0" title="전체 누적 날짜 선택">${opts}</select>`;
+            }
+
+            const recentDates = sortedDates.slice(-5);
+            html += recentDates.map((d, idx) => {
+                const isAct = (d === activeDate);
+                const cnt = Object.keys(historyDb.byDate[d]?.items || {}).length;
+                return `
+                    ${idx > 0 ? '<span class="text-slate-300 text-[10px]">▸</span>' : ''}
+                    <div class="inline-flex items-center rounded-md text-[11px] font-bold whitespace-nowrap transition-all shrink-0 ${isAct ? 'bg-blue-600 text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
+                        <button type="button" onclick="selectActiveDate('${d}')" class="pl-2 pr-1 py-0.5 flex items-center gap-1 cursor-pointer">
+                            <span>${formatShortDate(d)}</span>
+                            <span class="${isAct ? 'text-blue-200' : 'text-slate-400'} text-[10px]">${cnt}</span>
+                        </button>
+                        <button type="button" onclick="deleteSingleDate('${d}', event)" class="pr-1.5 pl-0.5 py-0.5 text-[10px] leading-none opacity-70 hover:opacity-100 ${isAct ? 'text-blue-100 hover:text-white' : 'text-slate-400 hover:text-rose-600'} cursor-pointer" title="${formatShortDate(d)} 날짜 삭제">×</button>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        window.selectActiveDate = function(dateStr) {
+            if (!historyDb.byDate[dateStr]) return;
+            activeDate = dateStr;
+            $('uploadDateInput').value = dateStr;
+            syncDateLabels(dateStr);
+            refreshAllUI();
+        };
+
+        window.deleteSingleDate = function(dateStr, event) {
+            if (event) event.stopPropagation();
+            if (!historyDb.byDate[dateStr]) return;
+            openConfirmModal('날짜 데이터 삭제', `[${formatShortDate(dateStr)}]에 저장된 모든 상품 스냅샷을 삭제하시겠습니까?`, () => {
+                delete historyDb.byDate[dateStr];
+                const rem = getSortedDates();
+                activeDate = rem.length > 0 ? rem[rem.length - 1] : '';
+                const syncTarget = activeDate || getTodayStr();
+                $('uploadDateInput').value = syncTarget;
+                syncDateLabels(syncTarget);
+                saveDatabase();
+                refreshAllUI();
+                showBanner(`🗑️ [${formatShortDate(dateStr)}] 기록이 삭제되었습니다.`, 'info');
+            });
+        };
+
+        // ============================================================
+        // 4. 대시보드 전체 갱신 & 메인 테이블 렌더링
+        // ============================================================
+        function refreshAllUI() {
+            const sortedDates = getSortedDates();
+            if (!activeDate || !historyDb.byDate[activeDate]) {
+                activeDate = sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : '';
+            }
+            renderDateTimeline(sortedDates);
+            updateKpiAndChipHighlights();
+            updateSortIconsUI();
+
+            // 숨김 상품 배지 갱신
+            const hiddenCount = Object.values(productMetaDb).filter(m => m && m.hidden).length;
+            const hiddenBadge = $('hiddenCountBadge');
+            if (hiddenCount > 0) {
+                hiddenBadge.textContent = hiddenCount;
+                hiddenBadge.classList.remove('hidden');
+            } else {
+                hiddenBadge.classList.add('hidden');
+            }
+
+            const leadTimeDays = Math.max(1, parseInt($('leadTimeInput').value, 10) || 7);
+            const basisType = $('basisSelect').value || 'AVG7';
+            const sensitivityKey = $('sensitivitySelect').value || 'STANDARD';
+            $('kpiLeadTimeDesc').textContent = `D-Day ≤ ${leadTimeDays}일 리드타임`;
+
+            // 데이터가 없는 초기 상태
+            if (!activeDate || !historyDb.byDate[activeDate]) {
+                currentAnalyzedList = [];
+                currentFilteredIds = [];
+                $('btnDownloadCsv').disabled = true;
+                $('uploadedFilesInfo').classList.add('hidden');
+                $('anomalyBriefingBanner').classList.add('hidden');
+                $('kpiTotalItems').innerHTML = `0<span class="text-xs font-normal text-slate-500 ml-0.5">개</span>`;
+                $('kpiSoldOutSub').textContent = '품절 0개 · 총재고 0개';
+                $('kpiUrgentOrder').innerHTML = `0<span class="text-xs font-normal text-rose-500 ml-0.5">개</span>`;
+                $('kpiNotWinner').innerHTML = `0<span class="text-xs font-normal text-amber-600 ml-0.5">개</span>`;
+                $('kpiWinnerRate').textContent = '위너 선정 0개 · 점유율 -';
+                $('kpiRestocked').innerHTML = `0<span class="text-xs font-normal text-sky-500 ml-0.5">건</span>`;
+                $('kpiAnomalyCounts').innerHTML = `<span class="text-orange-600">0</span><span class="text-slate-300 mx-1 font-normal">/</span><span class="text-indigo-600">0</span>`;
+                $('chipSurgeCount').textContent = '0';
+                $('chipDropCount').textContent = '0';
+
+                $('tableBody').innerHTML = `
+                    <tr>
+                        <td colspan="8" class="py-16 text-center text-slate-400">
+                            <div class="flex flex-col items-center justify-center space-y-3">
+                                <div class="w-12 h-12 rounded-2xl bg-blue-50 text-blue-500 flex items-center justify-center">
+                                    <i data-lucide="folder-open" class="w-6 h-6"></i>
+                                </div>
+                                <div>
+                                    <p class="text-sm font-extrabold text-slate-700">저장된 재고·판매 데이터가 없습니다.</p>
+                                    <p class="text-xs text-slate-400 mt-1">상단 <b>[업로드]</b> 버튼에 쿠팡 광고센터 HTML/PDF 파일을 드래그하거나, 아래 버튼으로 10일치 샘플을 체험해 보세요.</p>
+                                </div>
+                                <button type="button" onclick="loadSampleData()" class="mt-1 inline-flex items-center px-4 py-2 text-xs font-extrabold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-all cursor-pointer">
+                                    <i data-lucide="sparkles" class="w-3.5 h-3.5 mr-1.5"></i>
+                                    <span>샘플 데이터 불러오기 (10일치 · 급증/급감 체험)</span>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                lucide.createIcons();
+                if (currentMainTab === 'MANAGER') renderProductManagerTable();
+                return;
+            }
+
+            const dayData = historyDb.byDate[activeDate];
+            const datesUpToActive = sortedDates.filter(d => d <= activeDate);
+            const rawProducts = Object.values(dayData.items || {}).filter(item => !getProductMeta(item.id).hidden);
+
+            // 업로드 파일 정보 표시
+            if (dayData.files && dayData.files.length > 0) {
+                $('uploadedFilesInfo').textContent = `📂 ${formatShortDate(activeDate)} 파일 ${dayData.files.length}개`;
+                $('uploadedFilesInfo').title = dayData.files.join(', ');
+                $('uploadedFilesInfo').classList.remove('hidden');
+            } else {
+                $('uploadedFilesInfo').classList.add('hidden');
+            }
+
+            currentAnalyzedList = rawProducts.map(item => {
+                const meta = getProductMeta(item.id);
+                const itemLeadTime = (meta.leadTime && parseInt(meta.leadTime, 10) > 0) ? parseInt(meta.leadTime, 10) : leadTimeDays;
+                return {
+                    ...item,
+                    displayName: meta.customName?.trim() || item.name,
+                    imageUrl: (meta.imageUrl !== undefined ? meta.imageUrl : (item.imageUrl || '')).trim(),
+                    coupangUrl: (meta.customUrl !== undefined ? meta.customUrl : (item.url || '')).trim(),
+                    deliveryType: meta.deliveryType || '',
+                    memo: meta.memo || '',
+                    starred: !!meta.starred,
+                    analysis: analyzeProductHistory(item.id, activeDate, datesUpToActive, itemLeadTime, basisType, sensitivityKey)
+                };
+            });
+
+            $('btnDownloadCsv').disabled = currentAnalyzedList.length === 0;
+
+            // KPI 통계 집계
+            const totalItems = currentAnalyzedList.length;
+            const validStockItems = currentAnalyzedList.filter(i => i.stock !== null);
+            const totalStock = validStockItems.reduce((s, c) => s + c.stock, 0);
+            const soldOutCount = validStockItems.filter(i => i.stock === 0).length;
+            const urgentCount = currentAnalyzedList.filter(i => i.analysis.isUrgent).length;
+            const notWinnerCount = currentAnalyzedList.filter(i => i.winner === '미선정').length;
+            const winnerSelectedCount = currentAnalyzedList.filter(i => i.winner === '선정').length;
+            const winnerCheckedTotal = notWinnerCount + winnerSelectedCount;
+            const winnerRate = winnerCheckedTotal > 0 ? Math.round((winnerSelectedCount / winnerCheckedTotal) * 100) : 0;
+            const restockedCount = currentAnalyzedList.filter(i => i.analysis.isRecentRestock).length;
+            const surgeCount = currentAnalyzedList.filter(i => i.analysis.anomalyType === 'SURGE').length;
+            const dropCount = currentAnalyzedList.filter(i => i.analysis.anomalyType === 'DROP').length;
+
+            $('kpiTotalItems').innerHTML = `${totalItems.toLocaleString()}<span class="text-xs font-normal text-slate-500 ml-0.5">개</span>`;
+            $('kpiSoldOutSub').textContent = `품절 ${soldOutCount}개 · 총재고 ${totalStock.toLocaleString()}개`;
+            $('kpiUrgentOrder').innerHTML = `${urgentCount.toLocaleString()}<span class="text-xs font-normal text-rose-500 ml-0.5">개</span>`;
+            $('kpiNotWinner').innerHTML = `${notWinnerCount.toLocaleString()}<span class="text-xs font-normal text-amber-600 ml-0.5">개</span>`;
+            $('kpiWinnerRate').textContent = winnerCheckedTotal > 0 ? `위너 선정 ${winnerSelectedCount}개 · 점유율 ${winnerRate}%` : '위너 정보 없음';
+            $('kpiRestocked').innerHTML = `${restockedCount.toLocaleString()}<span class="text-xs font-normal text-sky-500 ml-0.5">건</span>`;
+            $('kpiAnomalyCounts').innerHTML = `<span class="text-orange-600" title="판매 급증">${surgeCount}</span><span class="text-slate-300 mx-1 font-normal">/</span><span class="text-indigo-600" title="판매 급감">${dropCount}</span>`;
+            $('chipSurgeCount').textContent = surgeCount;
+            $('chipDropCount').textContent = dropCount;
+
+            // 판매 이상 브리핑 배너 제어
+            const briefingEl = $('anomalyBriefingBanner');
+            if ((surgeCount > 0 || dropCount > 0) && anomalyBriefingDismissedForDate !== activeDate) {
+                $('briefingSurgeCnt').textContent = surgeCount;
+                $('briefingDropCnt').textContent = dropCount;
+                briefingEl.classList.remove('hidden');
+            } else {
+                briefingEl.classList.add('hidden');
+            }
+
+            // 검색 & 필터 적용
+            const query = ($('searchInput').value || '').trim().toLowerCase();
+            $('btnClearSearch').classList.toggle('hidden', !query);
+            const filterVal = $('filterSelect').value;
+
+            let filtered = currentAnalyzedList.filter(item => {
+                if (query) {
+                    const hay = `${item.name} ${item.displayName} ${item.id} ${item.memo}`.toLowerCase();
+                    if (!hay.includes(query)) return false;
+                }
+                if (currentDeliveryFilter === 'ROCKET' && item.deliveryType !== 'ROCKET') return false;
+                if (currentDeliveryFilter === 'FRESH' && item.deliveryType !== 'FRESH') return false;
+
+                if (filterVal === 'ANOMALY_ALL') return item.analysis.anomalyType !== 'NONE';
+                if (filterVal === 'SURGE') return item.analysis.anomalyType === 'SURGE';
+                if (filterVal === 'DROP') return item.analysis.anomalyType === 'DROP';
+                if (filterVal === 'NOT_WINNER') return item.winner === '미선정';
+                if (filterVal === 'URGENT_ORDER') return item.analysis.isUrgent;
+                if (filterVal === 'LOW_STOCK') return item.stock !== null && item.stock > 0 && item.stock <= 10;
+                if (filterVal === 'SOLD_OUT') return item.stock === 0;
+                if (filterVal === 'RESTOCKED') return item.analysis.isRecentRestock;
+                if (filterVal === 'HIGH_VELOCITY') return (item.analysis.activeAvg ?? 0) >= 5;
+                if (filterVal === 'STARRED') return item.starred;
+                return true;
+            });
+
+            // 정렬
+            const dir = currentSortDir === 'asc' ? 1 : -1;
+            filtered.sort((a, b) => {
+                if (currentSortKey === 'NAME') return a.displayName.localeCompare(b.displayName, 'ko') * dir;
+                if (currentSortKey === 'PRICE') return ((a.price || 0) - (b.price || 0)) * dir;
+                if (currentSortKey === 'STOCK') {
+                    const sa = a.stock ?? (dir > 0 ? 9999999 : -1);
+                    const sb = b.stock ?? (dir > 0 ? 9999999 : -1);
+                    return (sa - sb) * dir;
+                }
+                if (currentSortKey === 'AVG_SALES') return ((a.analysis.activeAvg ?? -1) - (b.analysis.activeAvg ?? -1)) * dir;
+                if (currentSortKey === 'DDAY') {
+                    const da = a.analysis.daysLeft !== null ? a.analysis.daysLeft : (dir > 0 ? 999999 : -1);
+                    const db = b.analysis.daysLeft !== null ? b.analysis.daysLeft : (dir > 0 ? 999999 : -1);
+                    return (da - db) * dir;
+                }
+                if (currentSortKey === 'GMV') return ((a.gmv || 0) - (b.gmv || 0)) * dir;
+                return ((a.searchCount || 0) - (b.searchCount || 0)) * dir;
+            });
+
+            currentFilteredIds = filtered.map(it => it.id);
+
+            if (filtered.length === 0) {
+                $('tableBody').innerHTML = `<tr><td colspan="8" class="py-12 text-center text-slate-400">선택한 필터 조건에 해당하는 상품이 없습니다.</td></tr>`;
+                if (currentMainTab === 'MANAGER') renderProductManagerTable();
+                return;
+            }
+
+            $('tableBody').innerHTML = filtered.map((item, idx) => {
+                const an = item.analysis;
+
+                // 썸네일 (46x46px)
+                const thumbHtml = item.imageUrl
+                    ? `<div onclick="openImageUrlModal('${item.id}', '${escHtml(item.displayName)}', '${escHtml(item.imageUrl)}', event)" class="w-[46px] h-[46px] rounded-lg overflow-hidden shrink-0 cursor-pointer hover:opacity-85 transition-opacity bg-slate-100" title="클릭하여 이미지 URL 변경">
+                           <img src="${escHtml(item.imageUrl)}" alt="" class="w-[46px] h-[46px] object-cover block" onerror="this.parentElement.innerHTML='<span class=\\'text-[9px] font-bold text-slate-400\\'>+ URL</span>'; this.parentElement.classList.add('flex','items-center','justify-center');">
+                       </div>`
+                    : `<div onclick="openImageUrlModal('${item.id}', '${escHtml(item.displayName)}', '', event)" class="w-[46px] h-[46px] rounded-lg bg-slate-100 hover:bg-blue-50 flex items-center justify-center shrink-0 cursor-pointer transition-colors" title="클릭하여 이미지 URL 입력">
+                           <span class="text-[9px] font-bold text-slate-400 hover:text-blue-600">+ URL</span>
+                       </div>`;
+
+                // 위너 뱃지 (.uniform-badge)
+                const winnerBadge = item.winner === '선정'
+                    ? `<span class="uniform-badge bg-emerald-50 text-emerald-700 border border-emerald-200">위너</span>`
+                    : item.winner === '미선정'
+                    ? `<span class="uniform-badge bg-rose-100 text-rose-700 border border-rose-300">미선정</span>`
+                    : `<span class="uniform-badge bg-slate-100 text-slate-400 border border-slate-200">위너 -</span>`;
+
+                // 쿠팡 링크 (등록된 경우에만 표시)
+                const linkBadge = item.coupangUrl
+                    ? `<a href="${escHtml(item.coupangUrl)}" target="_blank" onclick="event.stopPropagation()" class="uniform-badge bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white border border-blue-200 transition-colors">쿠팡 ↗</a>`
+                    : '';
+
+                // 판매가 + 직전 변동
+                let priceDiffHtml = '';
+                if (an.priceDiff > 0) {
+                    priceDiffHtml = `<div class="text-[10px] font-bold text-rose-600 mt-0.5 tabular-nums">▲+${an.priceDiff.toLocaleString()}</div>`;
+                } else if (an.priceDiff < 0) {
+                    priceDiffHtml = `<div class="text-[10px] font-bold text-blue-600 mt-0.5 tabular-nums">▼${an.priceDiff.toLocaleString()}</div>`;
+                }
+
+                // 현재 재고 + 직전 변동 통합 셀
+                let stockTopHtml = '';
+                if (item.stock === null) {
+                    stockTopHtml = `<span class="text-slate-400 font-semibold text-xs">확인불가</span>`;
+                } else if (item.stock === 0) {
+                    stockTopHtml = `<span class="px-2 py-0.5 bg-rose-100 text-rose-700 font-extrabold rounded text-xs">품절 0개</span>`;
+                } else if (item.stock <= 10) {
+                    stockTopHtml = `<span class="text-amber-600 font-extrabold text-[15px] tabular-nums">${item.stock.toLocaleString()}</span><span class="text-[11px] text-amber-600 ml-0.5">개</span>`;
+                } else {
+                    stockTopHtml = `<span class="text-slate-900 font-extrabold text-[15px] tabular-nums">${item.stock.toLocaleString()}</span><span class="text-[11px] text-slate-500 ml-0.5">개</span>`;
+                }
+
+                let diffSubHtml = `<span class="text-[10px] text-slate-400">이전 기록 없음</span>`;
+                if (an.latestSegment) {
+                    const seg = an.latestSegment;
+                    if (seg.isRestock) {
+                        diffSubHtml = `<span class="inline-block px-1.5 py-0.5 bg-sky-100 text-sky-700 font-extrabold rounded text-[10px] tabular-nums">📦 +${seg.restockQty.toLocaleString()} 입고</span>`;
+                    } else if (seg.soldQty > 0) {
+                        diffSubHtml = `<span class="text-[10px] font-bold text-rose-600 tabular-nums">▼ ${seg.soldQty.toLocaleString()}개 판매 (${seg.daysDiff}일)</span>`;
+                    } else {
+                        diffSubHtml = `<span class="text-[10px] text-slate-400">변동없음 (${seg.daysDiff}일)</span>`;
+                    }
+                }
+
+                // 최근 재고 추이 (최근 3회 숫자 + 최대 14일 미니 스파크라인)
+                const recent3 = an.timeline.slice(-3);
+                const flowNumsHtml = recent3.length > 0
+                    ? recent3.map(p => `<span class="font-bold text-slate-700 tabular-nums">${p.stock}</span>`).join('<span class="text-slate-300 mx-0.5">➔</span>')
+                    : '<span class="text-slate-300">-</span>';
+                const sparkHtml = buildMiniSparkline(an.timeline);
+
+                // 일평균 판매속도 + 판매 이상 뱃지 (🔥 +68% / 📉 -52%)
+                let velHtml = `<span class="text-slate-300 text-xs">-</span>`;
+                if (an.activeAvg !== null) {
+                    let anomalyBadgeHtml = '';
+                    const tipStr = `최근 3일: ${an.avg3 !== null ? an.avg3.toFixed(1) : '-'}개/일 vs ${an.baseSourceLabel}: ${an.baseAvg7 !== null ? an.baseAvg7.toFixed(1) : '-'}개/일`;
+                    if (an.anomalyType === 'SURGE') {
+                        const pctText = an.baseAvg7 === 0 ? '신규급증' : `+${Math.round(an.anomalyPct)}%`;
+                        anomalyBadgeHtml = `<div class="mt-0.5"><span title="${escHtml(tipStr)}" class="inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 border border-orange-300 text-[10px] font-extrabold tabular-nums cursor-help">🔥 ${pctText}</span></div>`;
+                    } else if (an.anomalyType === 'DROP') {
+                        anomalyBadgeHtml = `<div class="mt-0.5"><span title="${escHtml(tipStr)}" class="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 border border-indigo-300 text-[10px] font-extrabold tabular-nums cursor-help">📉 ${Math.round(an.anomalyPct)}%</span></div>`;
+                    } else {
+                        const fmt = (v) => v !== null ? v.toFixed(1) : '-';
+                        anomalyBadgeHtml = `<div class="text-[10px] text-slate-400 tabular-nums mt-0.5" title="${escHtml(tipStr)}">3일 ${fmt(an.avg3)} · 7일 ${fmt(an.avg7)}</div>`;
+                    }
+                    velHtml = `
+                        <div class="font-extrabold text-[14px] text-slate-900 tabular-nums">${an.activeAvg.toFixed(1)}<span class="text-[10px] font-normal text-slate-500 ml-0.5">개/일</span></div>
+                        ${anomalyBadgeHtml}
+                    `;
+                }
+
+                // 품절 예상 D-Day
+                let ddayHtml = `<span class="text-slate-300 text-[11px]">대기</span>`;
+                if (item.stock === 0) {
+                    ddayHtml = `<span class="inline-block px-1.5 py-0.5 bg-rose-600 text-white font-extrabold rounded text-[10px]">🚨 품절</span>`;
+                } else if (an.daysLeft !== null) {
+                    const dInt = Math.floor(an.daysLeft);
+                    if (an.isUrgent) {
+                        ddayHtml = `
+                            <div class="inline-flex flex-col items-center">
+                                <span class="px-1.5 py-0.5 bg-rose-600 text-white font-extrabold rounded text-[10px] tabular-nums">🚨 D-${dInt}</span>
+                                <span class="text-[9px] text-rose-600 font-bold mt-0.5 tabular-nums">리드 ${an.leadTimeDays}일</span>
+                            </div>
+                        `;
+                    } else if (an.daysLeft <= an.leadTimeDays * 2) {
+                        ddayHtml = `
+                            <div class="inline-flex flex-col items-center">
+                                <span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 font-extrabold rounded text-[10px] tabular-nums">주의 D-${dInt}</span>
+                                <span class="text-[9px] text-slate-400 mt-0.5 tabular-nums">${an.daysLeft.toFixed(0)}일 남음</span>
+                            </div>
+                        `;
+                    } else {
+                        ddayHtml = `
+                            <div class="inline-flex flex-col items-center">
+                                <span class="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 font-extrabold rounded text-[10px] tabular-nums">여유 D-${dInt}</span>
+                                <span class="text-[9px] text-slate-400 mt-0.5 tabular-nums">${an.daysLeft.toFixed(0)}일 남음</span>
+                            </div>
+                        `;
+                    }
+                } else if (item.stock !== null && an.activeAvg === 0) {
+                    ddayHtml = `<span class="text-[10px] text-slate-400">판매정체</span>`;
+                }
+
+                return `
+                    <tr class="hover:bg-blue-50/30 transition-colors ${idx % 2 === 1 ? 'bg-slate-50/40' : 'bg-white'}">
+                        <!-- 1) 상품 정보 -->
+                        <td class="py-2 px-3 min-w-0">
+                            <div class="flex items-center gap-2.5 min-w-0">
+                                <button type="button" onclick="toggleProductStar('${item.id}', event)" class="text-sm leading-none shrink-0 cursor-pointer ${item.starred ? 'text-amber-400' : 'text-slate-200 hover:text-amber-300'}" title="즐겨찾기 토글">★</button>
+                                ${thumbHtml}
+                                <div class="min-w-0 flex-1">
+                                    <button type="button" onclick="openProductDetailModal('${item.id}')" class="font-extrabold text-slate-900 hover:text-blue-600 hover:underline truncate text-left text-[13px] block w-full cursor-pointer" title="${escHtml(item.displayName)}${item.displayName !== item.name ? ' (원본: ' + escHtml(item.name) + ')' : ''}">${escHtml(item.displayName)}</button>
+                                    <div class="flex items-center gap-1 mt-1 flex-wrap">
+                                        ${getDeliveryBadgeHtml(item.deliveryType, true)}
+                                        ${winnerBadge}
+                                        <button type="button" onclick="copyProductId('${item.id}', event)" class="uniform-badge font-mono bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 cursor-pointer transition-colors" title="클릭하여 상품 ID 숫자 복사">${item.id}</button>
+                                        ${linkBadge}
+                                        ${item.memo ? `<span class="inline-flex items-center h-[22px] px-1.5 rounded text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 truncate max-w-[100px]" title="${escHtml(item.memo)}">📝 ${escHtml(item.memo)}</span>` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                        <!-- 2) 판매가 -->
+                        <td class="py-2 px-2 text-right border-l border-slate-100 tabular-nums">
+                            <div class="font-bold text-slate-800 text-xs">${item.price ? item.price.toLocaleString() + '원' : '-'}</div>
+                            ${priceDiffHtml}
+                        </td>
+                        <!-- 3) 현재 재고 / 변동 -->
+                        <td class="py-2 px-2 text-right border-l border-slate-100">
+                            <div>${stockTopHtml}</div>
+                            <div class="mt-0.5 truncate">${diffSubHtml}</div>
+                        </td>
+                        <!-- 4) 최근 재고 추이 -->
+                        <td class="py-2 px-2 border-l border-slate-100">
+                            <div class="flex flex-col items-start gap-0.5 overflow-hidden">
+                                <div class="text-[11px] leading-none truncate w-full">${flowNumsHtml}</div>
+                                <div>${sparkHtml}</div>
+                            </div>
+                        </td>
+                        <!-- 5) 일평균 판매속도 + 이상 뱃지 -->
+                        <td class="py-2 px-2 text-center border-l border-slate-100">${velHtml}</td>
+                        <!-- 6) 품절 예상 D-Day -->
+                        <td class="py-2 px-2 text-center border-l border-slate-100">${ddayHtml}</td>
+                        <!-- 7) 노출/검색 · 클릭 -->
+                        <td class="py-2 px-2 text-right border-l border-slate-100 tabular-nums">
+                            <div class="font-extrabold text-xs text-slate-800">${item.searchCount ? item.searchCount.toLocaleString() : '-'}</div>
+                            <div class="text-[10px] text-slate-400 mt-0.5 truncate">${item.clicks ? `${item.clicks.toLocaleString()}·${item.ctr}` : '-'}</div>
+                        </td>
+                        <!-- 8) 매출 / 전환율 -->
+                        <td class="py-2 px-2 text-right border-l border-slate-100 tabular-nums">
+                            <div class="font-extrabold text-xs text-slate-900">${item.gmv ? item.gmv.toLocaleString() + '원' : '-'}</div>
+                            <div class="text-[10px] text-slate-400 mt-0.5">${item.cvr && item.cvr !== '-' ? item.cvr : ''}</div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            if (currentMainTab === 'MANAGER') renderProductManagerTable();
+            lucide.createIcons();
+        }
+
+        // ============================================================
+        // 5. 상품 상세 분석 팝업 모달 (이상 진단 배너 + 기간 필터 + 인라인 보정)
+        // ============================================================
+        window.setDetailPeriodFilter = function(period) {
+            detailPeriodFilter = period;
+            ['7', '30', 'ALL'].forEach(k => {
+                const el = $(`detailPeriod_${k}`);
+                if (!el) return;
+                const isAct = String(period) === k;
+                el.className = isAct
+                    ? 'px-2.5 py-1 rounded-md font-extrabold bg-blue-600 text-white shadow-2xs transition-all'
+                    : 'px-2.5 py-1 rounded-md font-bold text-slate-600 hover:text-slate-900 transition-all';
+            });
+            if (currentDetailProductId) openProductDetailModal(currentDetailProductId);
+        };
+
+        window.openProductDetailModal = function(productId) {
+            currentDetailProductId = productId;
+            const allDates = getSortedDates();
+            if (!allDates.length) return;
+
+            let latestItem = null;
+            let targetDate = activeDate;
+            if (activeDate && historyDb.byDate[activeDate]?.items?.[productId]) {
+                latestItem = historyDb.byDate[activeDate].items[productId];
+            } else {
+                for (let i = allDates.length - 1; i >= 0; i--) {
+                    if (historyDb.byDate[allDates[i]]?.items?.[productId]) {
+                        latestItem = historyDb.byDate[allDates[i]].items[productId];
+                        targetDate = allDates[i];
+                        break;
+                    }
+                }
+            }
+            if (!latestItem) return;
+
+            const meta = getProductMeta(productId);
+            const globalLead = Math.max(1, parseInt($('leadTimeInput').value, 10) || 7);
+            const itemLeadTime = (meta.leadTime && parseInt(meta.leadTime, 10) > 0) ? parseInt(meta.leadTime, 10) : globalLead;
+            const sensitivityKey = $('sensitivitySelect').value || 'STANDARD';
+            const analysis = analyzeProductHistory(productId, targetDate, allDates.filter(d => d <= targetDate), itemLeadTime, $('basisSelect').value, sensitivityKey);
+            const displayName = meta.customName?.trim() || latestItem.name;
+            const imgUrl = (meta.imageUrl !== undefined ? meta.imageUrl : (latestItem.imageUrl || '')).trim();
+            const coupangUrl = (meta.customUrl !== undefined ? meta.customUrl : (latestItem.url || '')).trim();
+
+            // 썸네일 52x52px 엄격 고정
+            $('detailThumbBox').innerHTML = imgUrl
+                ? `<img src="${escHtml(imgUrl)}" alt="" class="w-[52px] h-[52px] max-w-[52px] max-h-[52px] object-cover block">`
+                : `<span class="text-[10px] font-bold text-slate-400">NO IMG</span>`;
+
+            // 상단 뱃지 규격 통일 (.detail-badge)
+            $('detailIdBadge').textContent = `ID: ${productId}`;
+            $('detailDeliveryBadge').innerHTML = getDeliveryBadgeHtml(meta.deliveryType, false);
+            $('detailWinnerBadge').innerHTML = latestItem.winner === '선정'
+                ? `<span class="detail-badge bg-emerald-100 text-emerald-800 border border-emerald-300">아이템 위너 선정</span>`
+                : latestItem.winner === '미선정'
+                ? `<span class="detail-badge bg-rose-100 text-rose-700 border border-rose-300">아이템 위너 미선정</span>`
+                : '';
+
+            const linkEl = $('detailCoupangLink');
+            if (coupangUrl) {
+                linkEl.href = coupangUrl;
+                linkEl.classList.remove('hidden');
+            } else {
+                linkEl.classList.add('hidden');
+            }
+
+            $('detailProductName').textContent = displayName;
+
+            // 이전/다음 내비게이션
+            const navIdx = currentFilteredIds.indexOf(productId);
+            if (navIdx !== -1 && currentFilteredIds.length > 0) {
+                $('detailNavPosition').textContent = `${navIdx + 1} / ${currentFilteredIds.length}`;
+                $('btnDetailPrev').disabled = (navIdx <= 0);
+                $('btnDetailNext').disabled = (navIdx >= currentFilteredIds.length - 1);
+            } else {
+                $('detailNavPosition').textContent = '1 / 1';
+                $('btnDetailPrev').disabled = true;
+                $('btnDetailNext').disabled = true;
+            }
+
+            // 신규: 판매 이상 진단 배너 렌더링
+            const diagEl = $('detailAnomalyBanner');
+            if (analysis.anomalyType === 'SURGE') {
+                const pctStr = analysis.baseAvg7 === 0 ? '신규 급증' : `+${Math.round(analysis.anomalyPct)}%`;
+                const dShortStr = analysis.shortDaysLeft !== null ? `D-${Math.floor(analysis.shortDaysLeft)}일 (약 ${analysis.shortDaysLeft.toFixed(1)}일)` : '즉시 확인 필요';
+                diagEl.className = 'rounded-xl px-4 py-3 border border-orange-300 bg-orange-50 text-orange-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2';
+                diagEl.innerHTML = `
+                    <div class="flex items-start sm:items-center gap-2">
+                        <span class="px-2 py-0.5 rounded-md bg-orange-600 text-white font-extrabold text-[11px] shrink-0">🔥 판매 급증</span>
+                        <div class="font-bold leading-snug">
+                            최근 3일 급증 속도(<span class="text-orange-700 font-extrabold">${analysis.avg3.toFixed(1)}개/일</span>, ${analysis.baseSourceLabel} ${analysis.baseAvg7.toFixed(1)}개 대비 <span class="text-orange-700 font-extrabold">${pctStr}</span>) 유지 시 예상 품절: <span class="underline text-rose-600 font-extrabold">${dShortStr}</span> — 긴급 발주 검토
+                        </div>
+                    </div>
+                `;
+                diagEl.classList.remove('hidden');
+            } else if (analysis.anomalyType === 'DROP') {
+                const cluesHtml = analysis.anomalyClues.map(c => `<span class="inline-flex items-center px-2 py-0.5 rounded-md bg-white border border-indigo-200 text-indigo-900 font-bold text-[11px]">${escHtml(c)}</span>`).join('');
+                diagEl.className = 'rounded-xl px-4 py-3 border border-indigo-300 bg-indigo-50 text-indigo-950 text-xs flex flex-col gap-1.5';
+                diagEl.innerHTML = `
+                    <div class="flex items-center flex-wrap gap-2">
+                        <span class="px-2 py-0.5 rounded-md bg-indigo-600 text-white font-extrabold text-[11px] shrink-0">📉 판매 급감</span>
+                        <span class="font-bold">최근 3일 평균 <b class="text-indigo-700">${analysis.avg3.toFixed(1)}개/일</b> (${analysis.baseSourceLabel} ${analysis.baseAvg7.toFixed(1)}개 대비 <b class="text-indigo-700">${Math.round(analysis.anomalyPct)}%</b> 하락)</span>
+                    </div>
+                    <div class="flex items-center flex-wrap gap-1.5">
+                        <span class="text-[11px] font-extrabold text-indigo-800">추정 원인 단서:</span>
+                        ${cluesHtml}
+                    </div>
+                `;
+                diagEl.classList.remove('hidden');
+            } else {
+                diagEl.classList.add('hidden');
+            }
+
+            // 요약 카드 4개 (1줄 고정)
+            $('detailCurrentStock').textContent = latestItem.stock !== null ? `${latestItem.stock.toLocaleString()}개` : '확인불가';
+            const priceDeltaTxt = analysis.priceDiff > 0 ? ` (▲+${analysis.priceDiff.toLocaleString()})` : (analysis.priceDiff < 0 ? ` (▼${analysis.priceDiff.toLocaleString()})` : '');
+            $('detailPrice').textContent = `판매가: ${latestItem.price ? latestItem.price.toLocaleString() + '원' : '-'}${priceDeltaTxt}`;
+
+            const fmtAvg = (v) => v !== null ? `${v.toFixed(1)}` : '-';
+            $('detailVelocity').textContent = analysis.activeAvg !== null ? `${analysis.activeAvg.toFixed(1)}개 / 일` : '데이터 부족';
+            $('detailSubVelocities').textContent = `3일 ${fmtAvg(analysis.avg3)} · 직전7일 ${fmtAvg(analysis.baseAvg7)} · 전체 ${fmtAvg(analysis.avgAll)}`;
+
+            if (latestItem.stock === 0) {
+                $('detailDDay').textContent = '🚨 현재 품절';
+                $('detailLeadTimeInfo').textContent = `리드타임 ${itemLeadTime}일 기준`;
+            } else if (analysis.daysLeft !== null) {
+                $('detailDDay').textContent = `${analysis.isUrgent ? '🚨 ' : ''}약 ${analysis.daysLeft.toFixed(1)}일 (D-${Math.floor(analysis.daysLeft)})`;
+                $('detailLeadTimeInfo').textContent = `리드타임 ${itemLeadTime}일 · ${analysis.isUrgent ? '즉시 발주 필요' : '재고 여유'}`;
+            } else {
+                $('detailDDay').textContent = '예측 불가';
+                $('detailLeadTimeInfo').textContent = `리드타임 ${itemLeadTime}일 기준`;
+            }
+
+            // 권장 발주 계산기 (30일 기본)
+            const updateOrderCalc = () => {
+                const days = Math.max(1, parseInt($('orderTargetDaysInput').value, 10) || 30);
+                const avg = analysis.activeAvg || 0;
+                const stk = latestItem.stock ?? 0;
+                const need = Math.max(0, Math.ceil(avg * days - stk));
+                $('orderCalcFormula').textContent = `(${days}일×${avg.toFixed(1)}) - ${stk}개`;
+                $('orderRecommendQty').textContent = `${need.toLocaleString()}개`;
+            };
+            $('orderTargetDaysInput').oninput = updateOrderCalc;
+            updateOrderCalc();
+
+            // 메모 & 개별 리드타임 세팅
+            $('detailQuickMemoInput').value = meta.memo || '';
+            $('detailQuickLeadInput').value = meta.leadTime || '';
+
+            // 기간 필터 적용 (최근 7일 / 30일 / 전체)
+            const segByToDate = {};
+            analysis.segments.forEach(s => { segByToDate[s.toDate] = s; });
+
+            let scopedTimeline = analysis.timeline;
+            if (detailPeriodFilter !== 'ALL' && scopedTimeline.length > 0) {
+                const maxDays = Number(detailPeriodFilter);
+                scopedTimeline = analysis.timeline.filter(pt => getSignedDaysDiff(pt.date, targetDate) < maxDays);
+                if (scopedTimeline.length === 0) scopedTimeline = analysis.timeline.slice(-1);
+            }
+
+            // 기간 필터 버튼 스타일 동기화
+            ['7', '30', 'ALL'].forEach(k => {
+                const el = $(`detailPeriod_${k}`);
+                if (!el) return;
+                const isAct = String(detailPeriodFilter) === k;
+                el.className = isAct
+                    ? 'px-2.5 py-1 rounded-md font-extrabold bg-blue-600 text-white shadow-2xs transition-all'
+                    : 'px-2.5 py-1 rounded-md font-bold text-slate-600 hover:text-slate-900 transition-all';
+            });
+
+            // 추이 차트 렌더링 (재고 선 + 일일 판매 막대)
+            renderDetailChart(scopedTimeline, segByToDate);
+
+            // 일자별 상세 표 (최신 날짜가 위로)
+            const reversedTimeline = [...scopedTimeline].reverse();
+            $('detailHistoryTableBody').innerHTML = reversedTimeline.map(pt => {
+                const seg = segByToDate[pt.date];
+                const raw = pt.raw || {};
+                let deltaHtml = `<span class="text-slate-400">최초 기준</span>`;
+                let rateHtml = `<span class="text-slate-400">-</span>`;
+                if (seg) {
+                    if (seg.isRestock) {
+                        deltaHtml = `<span class="px-1.5 py-0.5 bg-sky-100 text-sky-700 font-extrabold rounded text-[11px]">📦 +${seg.restockQty.toLocaleString()}개 입고 (${seg.daysDiff}일)</span>`;
+                        rateHtml = `<span class="text-sky-600 text-[11px]">평균제외</span>`;
+                    } else if (seg.soldQty > 0) {
+                        deltaHtml = `<span class="px-1.5 py-0.5 bg-rose-50 text-rose-700 font-bold rounded text-[11px]">-${seg.soldQty.toLocaleString()}개 판매 (${seg.daysDiff}일)</span>`;
+                        rateHtml = `<span class="font-bold text-slate-800">${seg.dailyRate.toFixed(1)}개/일</span>`;
+                    } else {
+                        deltaHtml = `<span class="text-slate-400">변동 없음 (${seg.daysDiff}일)</span>`;
+                        rateHtml = `<span class="text-slate-400">0.0개/일</span>`;
+                    }
+                }
+                const winBadge = raw.winner === '선정'
+                    ? `<span class="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded text-[10px] font-bold">선정</span>`
+                    : raw.winner === '미선정'
+                    ? `<span class="px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded text-[10px] font-bold">미선정</span>`
+                    : '-';
+
+                return `
+                    <tr class="hover:bg-slate-50">
+                        <td class="py-2 px-3 font-bold text-slate-700 whitespace-nowrap">${formatShortDate(pt.date)} <span class="text-[10px] font-normal text-slate-400">${pt.date}</span></td>
+                        <td class="py-2 px-3 text-right whitespace-nowrap tabular-nums">
+                            <button type="button" onclick="startInlineStockEdit(this, '${productId}', '${pt.date}', ${pt.stock})" class="font-extrabold text-slate-900 hover:text-blue-600 hover:bg-blue-50 px-1.5 py-0.5 rounded cursor-pointer transition-colors" title="클릭하여 재고 수량 직접 수정">
+                                ${pt.stock.toLocaleString()}개 <span class="text-[10px] text-slate-400">✎</span>
+                            </button>
+                        </td>
+                        <td class="py-2 px-3 text-right whitespace-nowrap tabular-nums">${deltaHtml}</td>
+                        <td class="py-2 px-3 text-right whitespace-nowrap tabular-nums">${rateHtml}</td>
+                        <td class="py-2 px-3 text-right whitespace-nowrap tabular-nums text-slate-700">${raw.price ? raw.price.toLocaleString() + '원' : '-'}</td>
+                        <td class="py-2 px-3 text-center whitespace-nowrap">${winBadge}</td>
+                        <td class="py-2 px-3 text-right whitespace-nowrap tabular-nums text-slate-600">${raw.searchCount ? raw.searchCount.toLocaleString() : '-'}</td>
+                        <td class="py-2 px-3 text-right whitespace-nowrap tabular-nums text-slate-600">${raw.clicks ? `${raw.clicks.toLocaleString()} · ${raw.ctr}` : '-'}</td>
+                        <td class="py-2 px-3 text-right whitespace-nowrap tabular-nums font-bold text-slate-800">${raw.gmv ? raw.gmv.toLocaleString() + '원' : '-'} <span class="text-[10px] font-normal text-slate-400">${raw.cvr && raw.cvr !== '-' ? raw.cvr : ''}</span></td>
+                    </tr>
+                `;
+            }).join('');
+
+            const modal = $('productDetailModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            lucide.createIcons();
+        };
+
+        window.closeProductDetailModal = function() {
+            const modal = $('productDetailModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            currentDetailProductId = null;
+        };
+
+        window.navigateDetailProduct = function(step) {
+            if (!currentDetailProductId || !currentFilteredIds.length) return;
+            const idx = currentFilteredIds.indexOf(currentDetailProductId);
+            const nextIdx = idx + step;
+            if (nextIdx >= 0 && nextIdx < currentFilteredIds.length) {
+                openProductDetailModal(currentFilteredIds[nextIdx]);
+            }
+        };
+
+        window.saveDetailQuickMeta = function() {
+            if (!currentDetailProductId) return;
+            if (!productMetaDb[currentDetailProductId]) productMetaDb[currentDetailProductId] = {};
+            productMetaDb[currentDetailProductId].memo = ($('detailQuickMemoInput').value || '').trim();
+            productMetaDb[currentDetailProductId].leadTime = ($('detailQuickLeadInput').value || '').trim();
+            saveProductMeta();
+            refreshAllUI();
+            openProductDetailModal(currentDetailProductId);
+            showBanner('💾 상품 메모 및 개별 리드타임이 즉시 저장되었습니다.', 'success');
+        };
+
+        // 과거 재고 수량 인라인 수정
+        window.startInlineStockEdit = function(btnEl, productId, dateStr, currentVal) {
+            const td = btnEl.parentElement;
+            td.innerHTML = `
+                <div class="inline-flex items-center gap-1 justify-end">
+                    <input type="number" min="0" value="${currentVal}" class="w-16 text-right px-1.5 py-0.5 bg-white border border-blue-500 rounded text-xs font-extrabold text-slate-900 focus:outline-none" onkeydown="if(event.key==='Enter') commitInlineStockEdit('${productId}','${dateStr}',this.value); if(event.key==='Escape') openProductDetailModal('${productId}');">
+                    <button type="button" onclick="commitInlineStockEdit('${productId}','${dateStr}',this.previousElementSibling.value)" class="px-1.5 py-0.5 bg-blue-600 text-white rounded text-[10px] font-bold">저장</button>
+                </div>
+            `;
+            const inp = td.querySelector('input');
+            inp.focus();
+            inp.select();
+        };
+
+        window.commitInlineStockEdit = function(productId, dateStr, newValStr) {
+            const parsed = parseInt(newValStr, 10);
+            if (isNaN(parsed) || parsed < 0) {
+                showBanner('❗ 0 이상의 올바른 재고 숫자를 입력해 주세요.', 'warning');
+                return;
+            }
+            if (historyDb.byDate[dateStr]?.items?.[productId]) {
+                historyDb.byDate[dateStr].items[productId].stock = parsed;
+                saveDatabase();
+                refreshAllUI();
+                openProductDetailModal(productId);
+                showBanner(`✅ [${formatShortDate(dateStr)}] 재고량이 ${parsed.toLocaleString()}개로 보정되었습니다.`, 'success');
+            }
+        };
+
+        // 상세 팝업 차트 (보유 재고 선 + 일일 판매량 주황 막대 복합 차트)
+        function renderDetailChart(timeline, segByToDate) {
+            const container = $('detailChartContainer');
+            if (!timeline || timeline.length === 0) {
+                container.innerHTML = `<div class="py-8 text-center text-xs text-slate-400">선택한 기간에 재고 이력이 없습니다.</div>`;
+                return;
+            }
+            const pts = timeline;
+            const w = Math.max(640, pts.length * 64);
+            const h = 156;
+            const padX = 36, padTop = 24, padBot = 28;
+            const chartH = h - padTop - padBot;
+
+            const stocks = pts.map(p => p.stock);
+            const maxStock = Math.max(10, ...stocks);
+            const dailyRates = pts.map(p => {
+                const seg = segByToDate[p.date];
+                return (seg && !seg.isRestock && seg.dailyRate > 0) ? seg.dailyRate : 0;
+            });
+            const maxRate = Math.max(5, ...dailyRates);
+
+            const coords = pts.map((p, idx) => {
+                const x = pts.length === 1 ? w / 2 : padX + (idx / (pts.length - 1)) * (w - padX * 2);
+                const y = h - padBot - (p.stock / maxStock) * chartH;
+                const rate = dailyRates[idx];
+                const barH = rate > 0 ? Math.max(4, (rate / maxRate) * (chartH * 0.55)) : 0;
+                return { x, y, date: p.date, stock: p.stock, rate, barH };
+            });
+
+            const pathD = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ');
+            const areaD = `${pathD} L ${coords[coords.length - 1].x.toFixed(1)} ${(h - padBot).toFixed(1)} L ${coords[0].x.toFixed(1)} ${(h - padBot).toFixed(1)} Z`;
+
+            const bars = coords.map(c => c.barH > 0 ? `
+                <rect x="${(c.x - 9).toFixed(1)}" y="${(h - padBot - c.barH).toFixed(1)}" width="18" height="${c.barH.toFixed(1)}" rx="3" fill="#fb923c" fill-opacity="0.38">
+                    <title>${formatShortDate(c.date)} 일평균 판매: ${c.rate.toFixed(1)}개/일</title>
+                </rect>
+            ` : '').join('');
+
+            const nodes = coords.map(c => `
+                <circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="#2563eb" stroke="#ffffff" stroke-width="2"></circle>
+                <text x="${c.x.toFixed(1)}" y="${(c.y - 9).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="800" fill="#1e293b">${c.stock.toLocaleString()}</text>
+                <text x="${c.x.toFixed(1)}" y="${h - 8}" text-anchor="middle" font-size="10" font-weight="600" fill="#64748b">${formatShortDate(c.date)}</text>
+            `).join('');
+
+            container.innerHTML = `
+                <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="block">
+                    <defs>
+                        <linearGradient id="stockAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.18"></stop>
+                            <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.01"></stop>
+                        </linearGradient>
+                    </defs>
+                    <line x1="${padX}" y1="${h - padBot}" x2="${w - padX}" y2="${h - padBot}" stroke="#cbd5e1" stroke-width="1"></line>
+                    ${bars}
+                    ${coords.length > 1 ? `<path d="${areaD}" fill="url(#stockAreaGrad)"></path><path d="${pathD}" fill="none" stroke="#2563eb" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>` : ''}
+                    ${nodes}
+                </svg>
+            `;
+        }
+
+        // ============================================================
+        // 6. 제품 리스트 관리 탭
+        // ============================================================
+        function getAllUniqueProductsAcrossHistory() {
+            const sortedDates = getSortedDates();
+            const map = new Map();
+            sortedDates.forEach(d => {
+                const items = historyDb.byDate[d]?.items || {};
+                Object.values(items).forEach(it => {
+                    map.set(it.id, { ...it, lastSeenDate: d });
+                });
+            });
+            return Array.from(map.values());
+        }
+
+        function renderProductManagerTable() {
+            const allProducts = getAllUniqueProductsAcrossHistory();
+            $('mgrTotalCount').textContent = `${allProducts.length}개`;
+
+            const query = ($('mgrSearchInput')?.value || '').trim().toLowerCase();
+            const filter = $('mgrFilterSelect')?.value || 'ALL';
+
+            const filtered = allProducts.filter(item => {
+                const m = getProductMeta(item.id);
+                if (query) {
+                    const hay = `${item.name} ${m.customName || ''} ${item.id} ${m.memo || ''}`.toLowerCase();
+                    if (!hay.includes(query)) return false;
+                }
+                if (filter === 'ROCKET') return m.deliveryType === 'ROCKET';
+                if (filter === 'FRESH') return m.deliveryType === 'FRESH';
+                if (filter === 'ACTIVE') return !m.hidden;
+                if (filter === 'HIDDEN') return !!m.hidden;
+                if (filter === 'STARRED') return !!m.starred;
+                return true;
+            });
+
+            const tbody = $('mgrTableBody');
+            if (!filtered.length) {
+                tbody.innerHTML = `<tr><td colspan="11" class="py-12 text-center text-slate-400">조건에 해당하는 등록 상품이 없습니다.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(item => {
+                const meta = getProductMeta(item.id);
+                const imgUrl = (meta.imageUrl !== undefined ? meta.imageUrl : (item.imageUrl || '')).trim();
+                const coupangUrl = (meta.customUrl !== undefined ? meta.customUrl : (item.url || '')).trim();
+                const deliveryType = meta.deliveryType || '';
+                const isHidden = !!meta.hidden;
+                const isStarred = !!meta.starred;
+                const selectStyle = deliveryType === 'FRESH'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold'
+                    : deliveryType === 'ROCKET'
+                    ? 'bg-sky-50 text-sky-800 border-sky-300 font-extrabold'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 font-medium';
+
+                return `
+                    <tr data-mgr-id="${item.id}" class="hover:bg-slate-50/80 ${isHidden ? 'opacity-60 bg-slate-50' : 'bg-white'}">
+                        <td class="py-2 px-2 text-center">
+                            <button type="button" onclick="toggleProductStar('${item.id}')" class="text-base leading-none cursor-pointer ${isStarred ? 'text-amber-400' : 'text-slate-300 hover:text-amber-300'}" title="즐겨찾기 토글">★</button>
+                        </td>
+                        <td class="py-2 px-2 text-center">
+                            <div class="w-10 h-10 mx-auto rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center">
+                                ${imgUrl ? `<img src="${escHtml(imgUrl)}" alt="" class="w-10 h-10 object-cover">` : `<span class="text-[9px] text-slate-400 font-bold">NO IMG</span>`}
+                            </div>
+                        </td>
+                        <td class="py-2.5 px-3 min-w-[380px] max-w-[460px]">
+                            <div onclick="openProductDetailModal('${item.id}')" class="font-bold text-slate-900 hover:text-blue-600 hover:underline truncate cursor-pointer text-xs" title="${escHtml(item.name)}">${escHtml(item.name)}</div>
+                            <div class="flex items-center gap-1.5 mt-1 text-[11px] text-slate-500">
+                                <button type="button" onclick="copyProductId('${item.id}', event)" class="font-mono bg-slate-100 hover:bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200 cursor-pointer transition-colors" title="클릭하여 상품 ID 숫자 복사">ID: ${item.id}</button>
+                                <span>최근재고: <b class="text-slate-800">${item.stock !== null ? item.stock + '개' : '-'}</b></span>
+                                ${coupangUrl ? `<a href="${escHtml(coupangUrl)}" target="_blank" class="text-blue-600 hover:underline font-bold ml-1">쿠팡보기 ↗</a>` : `<span class="text-slate-400 ml-1">URL 미등록</span>`}
+                            </div>
+                        </td>
+                        <td class="py-2 px-2 w-36 min-w-[138px] text-center whitespace-nowrap">
+                            <select id="mgr_deliveryType_${item.id}" onchange="updateProductDeliveryInstant('${item.id}', this.value)" class="w-full min-w-[126px] px-2 py-1.5 border rounded-lg text-xs whitespace-nowrap focus:outline-none focus:border-blue-500 ${selectStyle}">
+                                <option value="" ${deliveryType === '' ? 'selected' : ''}>미지정</option>
+                                <option value="ROCKET" ${deliveryType === 'ROCKET' ? 'selected' : ''}>🚀 로켓배송</option>
+                                <option value="FRESH" ${deliveryType === 'FRESH' ? 'selected' : ''}>🌿 로켓프레시</option>
+                            </select>
+                        </td>
+                        <td class="py-2 px-2 w-32"><input type="text" id="mgr_customName_${item.id}" value="${escHtml(meta.customName)}" placeholder="짧은 별칭" class="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-blue-500 focus:bg-white"></td>
+                        <td class="py-2 px-2 w-36"><input type="url" id="mgr_imageUrl_${item.id}" value="${escHtml(imgUrl)}" placeholder="https://..." class="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-blue-500 focus:bg-white"></td>
+                        <td class="py-2 px-2 w-40"><input type="url" id="mgr_customUrl_${item.id}" value="${escHtml(coupangUrl)}" placeholder="https://www.coupang.com/..." class="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-blue-500 focus:bg-white"></td>
+                        <td class="py-2 px-2 text-center"><input type="number" id="mgr_leadTime_${item.id}" min="1" max="120" value="${escHtml(meta.leadTime)}" placeholder="기본(${$('leadTimeInput').value}일)" class="w-20 text-center px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-rose-600 focus:outline-none focus:border-blue-500 focus:bg-white"></td>
+                        <td class="py-2 px-2.5"><input type="text" id="mgr_memo_${item.id}" value="${escHtml(meta.memo)}" placeholder="발주처/특이사항 메모..." class="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-blue-500 focus:bg-white"></td>
+                        <td class="py-2 px-2 text-center"><button type="button" onclick="toggleProductHidden('${item.id}')" class="px-2 py-1 rounded-lg text-[11px] font-bold transition-colors ${isHidden ? 'bg-slate-200 text-slate-600 hover:bg-slate-300' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'}">${isHidden ? '숨김됨' : '표시중'}</button></td>
+                        <td class="py-2 px-2 text-center">
+                            <div class="flex items-center justify-center gap-1">
+                                <button type="button" onclick="saveSingleProductRow('${item.id}')" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold transition-colors shadow-2xs">저장</button>
+                                <button type="button" onclick="deleteProductCompletely('${item.id}')" class="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors" title="영구 삭제"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        function applyProductRowInputsToMeta(productId) {
+            if (!productMetaDb[productId]) productMetaDb[productId] = {};
+            const meta = productMetaDb[productId];
+            const getVal = (prefix) => $(`${prefix}_${productId}`)?.value.trim() ?? '';
+            if ($(`mgr_deliveryType_${productId}`)) meta.deliveryType = getVal('mgr_deliveryType');
+            if ($(`mgr_customName_${productId}`)) meta.customName = getVal('mgr_customName');
+            if ($(`mgr_imageUrl_${productId}`)) {
+                meta.imageUrl = getVal('mgr_imageUrl');
+                Object.values(historyDb.byDate).forEach(rec => { if (rec?.items?.[productId]) rec.items[productId].imageUrl = meta.imageUrl; });
+            }
+            if ($(`mgr_customUrl_${productId}`)) meta.customUrl = getVal('mgr_customUrl');
+            if ($(`mgr_leadTime_${productId}`)) meta.leadTime = getVal('mgr_leadTime');
+            if ($(`mgr_memo_${productId}`)) meta.memo = getVal('mgr_memo');
+        }
+
+        window.saveSingleProductRow = function(productId) {
+            applyProductRowInputsToMeta(productId);
+            saveProductMeta();
+            saveDatabase();
+            refreshAllUI();
+            showBanner(`💾 상품 [ID: ${productId}]의 수정사항이 저장되었습니다!`, 'success');
+        };
+
+        window.saveAllProductManagerRows = function() {
+            const rows = document.querySelectorAll('#mgrTableBody tr[data-mgr-id]');
+            if (!rows.length) { showBanner('❗ 저장할 상품이 없습니다.', 'warning'); return; }
+            rows.forEach(tr => applyProductRowInputsToMeta(tr.getAttribute('data-mgr-id')));
+            saveProductMeta();
+            saveDatabase();
+            refreshAllUI();
+            showBanner(`💾 총 ${rows.length}개 상품의 수정 정보가 모두 저장되었습니다!`, 'success');
+        };
+
+        window.updateProductDeliveryInstant = function(productId, val) {
+            if (!productMetaDb[productId]) productMetaDb[productId] = {};
+            productMetaDb[productId].deliveryType = val;
+            saveProductMeta();
+            refreshAllUI();
+        };
+
+        window.toggleProductStar = function(productId, event) {
+            if (event) event.stopPropagation();
+            if (!productMetaDb[productId]) productMetaDb[productId] = {};
+            productMetaDb[productId].starred = !productMetaDb[productId].starred;
+            saveProductMeta();
+            refreshAllUI();
+        };
+
+        window.toggleProductHidden = function(productId) {
+            if (!productMetaDb[productId]) productMetaDb[productId] = {};
+            productMetaDb[productId].hidden = !productMetaDb[productId].hidden;
+            saveProductMeta();
+            refreshAllUI();
+        };
+
+        window.deleteProductCompletely = function(productId) {
+            openConfirmModal('상품 영구 삭제', `상품 ID [${productId}] 데이터를 모든 날짜 기록에서 영구 삭제하시겠습니까?`, () => {
+                Object.values(historyDb.byDate).forEach(rec => { if (rec?.items) delete rec.items[productId]; });
+                delete productMetaDb[productId];
+                saveProductMeta();
+                saveDatabase();
+                refreshAllUI();
+                showBanner(`🗑️ 상품 ID [${productId}]가 모든 날짜에서 삭제되었습니다.`, 'info');
+            });
+        };
+
+        // ============================================================
+        // 7. CSV / JSON 입출력 & 10일치 샘플 데이터 (급증·급감 체험용)
+        // ============================================================
+        function triggerCsvDownload(filename, headers, rows) {
+            const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function parseCsvText(csvText) {
+            const rows = [];
+            let row = [], cell = '', inQuotes = false;
+            const s = csvText.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            for (let i = 0; i < s.length; i++) {
+                const ch = s[i];
+                if (inQuotes) {
+                    if (ch === '"' && s[i + 1] === '"') { cell += '"'; i++; }
+                    else if (ch === '"') { inQuotes = false; }
+                    else { cell += ch; }
+                } else {
+                    if (ch === '"') { inQuotes = true; }
+                    else if (ch === ',') { row.push(cell); cell = ''; }
+                    else if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+                    else { cell += ch; }
+                }
+            }
+            if (cell.length > 0 || row.length > 0) { row.push(cell); rows.push(row); }
+            return rows.filter(r => r.some(c => c.trim() !== ''));
+        }
+
+        // 빈 화면에서 체험할 수 있는 10일치 샘플 데이터 (최근 3일 vs 직전 7일 급증/급감/입고/품절 시나리오)
+        window.loadSampleData = function() {
+            const sampleDates = [
+                '2026-11-13', '2026-11-14', '2026-11-16', '2026-11-17', '2026-11-18',
+                '2026-11-19', '2026-11-20', '2026-11-21', '2026-11-22', '2026-11-23'
+            ];
+            const sampleProducts = [
+                // 🔥 급증 1: 평소 직전 7일 약 10개/일 -> 최근 3일 약 24개/일 (+140% 급증, D-Day 긴급)
+                { id: '96118124658', name: '쿠킹플러스 잘라서 사용하는 위생 도마, 30cmx10m, 2개', prices: [14100,14100,14100,14100,14100,14100,14100,14100,14100,14100], winner: '선정', searchCount: 1420, clicks: 158, ctr: '1.85%', cvr: '44.20%', gmv: 521700, deliv: 'ROCKET', stocks: [220,210,190,180,170,160,150,126,102,78] },
+                // 🔥 급증 2: 로켓프레시, 평소 약 6개/일 -> 최근 3일 약 14개/일 (+133% 급증)
+                { id: '94073531619', name: '닥터외트커 바닐라익스트랙, 1개, 100ml', prices: [19350,19350,19350,19350,19350,19350,19350,19350,19350,19350], winner: '선정', searchCount: 980, clicks: 205, ctr: '1.92%', cvr: '18.50%', gmv: 348300, deliv: 'FRESH', stocks: [130,124,112,106,100,94,88,74,60,46] },
+                // 📉 급감 1 (원인: 위너 미선정): 평소 12개/일 -> 최근 3일 3개/일 (-75% 급감)
+                { id: '86962666099', name: '쿠킹플러스 에어프라이어용 자연 종이호일, 대(26cm), 50개입, 4개', prices: [15480,15480,15480,15480,15480,15480,15480,15480,15480,15480], winner: '미선정', searchCount: 771, clicks: 41, ctr: '0.82%', cvr: '14.20%', gmv: 92880, deliv: 'ROCKET', stocks: [240,228,204,192,180,168,156,153,150,147] },
+                // 📉 급감 2 (원인: 판매가 인상 +2,000원): 평소 9개/일 -> 최근 3일 3개/일 (-67% 급감)
+                { id: '91812080462', name: '쿠킹플러스 쉽고 빠른 전동 밀가루체, 1개', prices: [12390,12390,12390,12390,12390,12390,12390,14390,14390,14390], winner: '선정', searchCount: 640, clicks: 96, ctr: '1.10%', cvr: '6.25%', gmv: 86340, deliv: 'ROCKET', stocks: [175,166,148,139,130,121,112,109,106,103] },
+                // 📦 최근 추가 입고 감지 (최근 구간 입고로 이상 감지에서 정상 제외)
+                { id: '95907202024', name: 'WorldCraft 힛툴 블루, 2개', prices: [54500,54500,54500,54500,54500,54500,54500,54500,54500,54500], winner: '선정', searchCount: 866, clicks: 48, ctr: '1.12%', cvr: '33.33%', gmv: 490500, deliv: 'ROCKET', stocks: [110,104,92,86,80,74,68,62,56,210] },
+                // ❌ 현재 품절 (0개 → 급감 알림에서 자동 제외, 발주 시급으로만 표시)
+                { id: '85138049034', name: '이지에스 무선 핸드믹서, EHM-004(핑크)', prices: [19590,19590,19590,19590,19590,19590,19590,19590,19590,19590], winner: '미선정', searchCount: 548, clicks: 33, ctr: '0.73%', cvr: '22.10%', gmv: 39180, deliv: 'ROCKET', stocks: [42,36,24,18,12,7,3,1,0,0] },
+                // 안정적 판매 (정상 상품)
+                { id: '85895583654', name: '로앤 퓨어 바닐라 익스트랙, 118ml, 2개', prices: [45500,45500,45500,45500,45500,45500,45500,45500,45500,45500], winner: '선정', searchCount: 607, clicks: 52, ctr: '1.32%', cvr: '58.00%', gmv: 864500, deliv: 'FRESH', stocks: [185,179,167,161,155,149,143,137,130,124] },
+                // 소량 노이즈 테스트 상품 (평소 1개/일 -> 최근 2개/일: +100%이지만 절대변화 < 3개 & 기준선 < 3개이므로 노이즈 차단!)
+                { id: '90747854138', name: 'WorldCraft 무선 글루건 화이트, 1개', prices: [23110,23110,23110,23110,23110,23110,23110,23110,23110,23110], winner: '선정', searchCount: 312, clicks: 24, ctr: '0.90%', cvr: '8.33%', gmv: 46220, deliv: 'ROCKET', stocks: [35,34,32,31,30,29,28,26,24,22] }
+            ];
+
+            historyDb = { byDate: {} };
+            sampleDates.forEach((d, dIdx) => {
+                historyDb.byDate[d] = { items: {}, files: ['샘플_쿠팡광고센터_10일치.html'], updatedAt: '09:00', isSample: true };
+                sampleProducts.forEach(p => {
+                    historyDb.byDate[d].items[p.id] = {
+                        id: p.id,
+                        name: p.name,
+                        url: `https://www.coupang.com/vp/products/${p.id}`,
+                        imageUrl: '',
+                        price: p.prices[dIdx],
+                        stock: p.stocks[dIdx],
+                        winner: p.winner,
+                        searchCount: p.searchCount,
+                        clicks: p.clicks,
+                        ctr: p.ctr,
+                        cvr: p.cvr,
+                        gmv: p.gmv,
+                        cartCount: 10
+                    };
+                    if (!productMetaDb[p.id]) productMetaDb[p.id] = {};
+                    if (!productMetaDb[p.id].deliveryType) productMetaDb[p.id].deliveryType = p.deliv;
+                    if (!productMetaDb[p.id].customUrl) productMetaDb[p.id].customUrl = `https://www.coupang.com/vp/products/${p.id}`;
+                });
+            });
+
+            activeDate = sampleDates[sampleDates.length - 1];
+            anomalyBriefingDismissedForDate = '';
+            $('uploadDateInput').value = activeDate;
+            syncDateLabels(activeDate);
+            saveProductMeta();
+            saveDatabase();
+            refreshAllUI();
+            showBanner('✨ 최근 3일 vs 직전 7일 급증·급감, 위너 미선정, 가격 인상, 추가 입고, 노이즈 차단 시나리오가 담긴 10일치 샘플을 불러왔습니다!', 'success');
+        };
+
+        // ============================================================
+        // 8. 이벤트 바인딩 및 앱 초기화
+        // ============================================================
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStorage();
+
+            // 설정 복원
+            $('leadTimeInput').value = appSettings.leadTime || 7;
+            $('basisSelect').value = appSettings.basis || 'AVG7';
+            $('sensitivitySelect').value = appSettings.sensitivity || 'STANDARD';
+            updateHeaderLogoUI();
+
+            const dates = getSortedDates();
+            const initDate = dates.length > 0 ? dates[dates.length - 1] : getTodayStr();
+            activeDate = dates.length > 0 ? initDate : '';
+            $('uploadDateInput').value = initDate;
+            syncDateLabels(initDate);
+
+            // 기준일 선택기 이벤트
+            $('uploadDateInput').addEventListener('change', (e) => {
+                const val = e.target.value;
+                if (!val) return;
+                syncDateLabels(val);
+                if (historyDb.byDate[val]) {
+                    activeDate = val;
+                    refreshAllUI();
+                }
+            });
+
+            $('btnSetToday').addEventListener('click', () => {
+                const today = getTodayStr();
+                $('uploadDateInput').value = today;
+                syncDateLabels(today);
+                if (historyDb.byDate[today]) {
+                    activeDate = today;
+                    refreshAllUI();
+                }
+            });
+
+            // 파일 드래그 앤 드롭 & 클릭 업로드
+            const dz = $('dropZone');
+            const fi = $('fileInput');
+            dz.addEventListener('click', () => fi.click());
+            dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('drag-over'); });
+            dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+            dz.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dz.classList.remove('drag-over');
+                if (e.dataTransfer.files?.length > 0) handleFileUpload(e.dataTransfer.files);
+            });
+            fi.addEventListener('change', (e) => {
+                if (e.target.files?.length > 0) handleFileUpload(e.target.files);
+            });
+
+            // 검색 & 필터 & 설정 이벤트
+            $('searchInput').addEventListener('input', refreshAllUI);
+            $('filterSelect').addEventListener('change', refreshAllUI);
+            $('leadTimeInput').addEventListener('change', () => { saveSettings(); refreshAllUI(); });
+            $('basisSelect').addEventListener('change', () => { saveSettings(); refreshAllUI(); });
+            $('sensitivitySelect').addEventListener('change', () => {
+                saveSettings();
+                anomalyBriefingDismissedForDate = '';
+                refreshAllUI();
+                const preset = SENSITIVITY_PRESETS[appSettings.sensitivity];
+                showBanner(`⚡ 판매 이상감지 민감도가 [${preset.label}] 기준으로 변경되었습니다.`, 'info');
+            });
+
+            $('mgrSearchInput')?.addEventListener('input', renderProductManagerTable);
+            $('mgrFilterSelect')?.addEventListener('change', renderProductManagerTable);
+
+            // 대시보드 엑셀 CSV 다운로드
+            $('btnDownloadCsv').addEventListener('click', () => {
+                if (!currentAnalyzedList.length) return;
+                const headers = ['순번', '배송구분', '상품명', '상품ID', '판매가', '현재재고', '최근3일평균', '직전7일기준선', '최근7일평균', '전체일평균', '판매이상상태', '이상증감률(%)', '품절예상일수', '아이템위너', '노출/검색', '클릭수', 'CTR', '전환율', '전체매출', '판매링크', '메모'];
+                const rows = currentAnalyzedList.map((it, idx) => {
+                    const an = it.analysis;
+                    const anomLabel = an.anomalyType === 'SURGE' ? '판매급증' : (an.anomalyType === 'DROP' ? '판매급감' : '정상');
+                    return [
+                        idx + 1,
+                        it.deliveryType === 'FRESH' ? '로켓프레시' : (it.deliveryType === 'ROCKET' ? '로켓배송' : ''),
+                        escCsv(it.displayName),
+                        `="${it.id}"`,
+                        it.price || 0,
+                        it.stock ?? '',
+                        an.avg3 !== null ? an.avg3.toFixed(2) : '',
+                        an.baseAvg7 !== null ? an.baseAvg7.toFixed(2) : '',
+                        an.avg7 !== null ? an.avg7.toFixed(2) : '',
+                        an.avgAll !== null ? an.avgAll.toFixed(2) : '',
+                        anomLabel,
+                        an.anomalyPct !== null ? Math.round(an.anomalyPct) : '',
+                        an.daysLeft !== null ? an.daysLeft.toFixed(1) : '',
+                        it.winner,
+                        it.searchCount || 0,
+                        it.clicks || 0,
+                        it.ctr || '-',
+                        it.cvr || '-',
+                        it.gmv || 0,
+                        escCsv(it.coupangUrl),
+                        escCsv(it.memo)
+                    ].join(',');
+                });
+                triggerCsvDownload(`쿠팡_재고분석_${activeDate || getTodayStr()}.csv`, headers, rows);
+                showBanner(`📥 [${formatShortDate(activeDate)}] 분석 결과 엑셀(CSV) 파일이 다운로드되었습니다.`, 'success');
+            });
+
+            // JSON 백업
+            $('btnBackupJson').addEventListener('click', () => {
+                const payload = {
+                    version: '2.5',
+                    exportedAt: new Date().toISOString(),
+                    historyDb,
+                    productMetaDb,
+                    appSettings
+                };
+                const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `쿠팡_재고DB백업_${getTodayStr()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showBanner('💾 전체 누적 기록, 제품 마스터, 로고/민감도 설정이 JSON 백업 파일로 저장되었습니다.', 'success');
+            });
+
+            // JSON 복원
+            $('btnRestoreJson').addEventListener('click', () => $('backupInput').click());
+            $('backupInput').addEventListener('change', async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                try {
+                    const parsed = JSON.parse(await file.text());
+                    if (parsed.historyDb?.byDate) historyDb = parsed.historyDb;
+                    else if (parsed.byDate) historyDb = parsed;
+                    if (parsed.productMetaDb) productMetaDb = parsed.productMetaDb;
+                    if (parsed.appSettings) {
+                        appSettings = { ...appSettings, ...parsed.appSettings };
+                        $('leadTimeInput').value = appSettings.leadTime || 7;
+                        $('basisSelect').value = appSettings.basis || 'AVG7';
+                        $('sensitivitySelect').value = SENSITIVITY_PRESETS[appSettings.sensitivity] ? appSettings.sensitivity : 'STANDARD';
+                        updateHeaderLogoUI();
+                    }
+                    const restDates = getSortedDates();
+                    activeDate = restDates.length > 0 ? restDates[restDates.length - 1] : '';
+                    anomalyBriefingDismissedForDate = '';
+                    if (activeDate) {
+                        $('uploadDateInput').value = activeDate;
+                        syncDateLabels(activeDate);
+                    }
+                    saveDatabase();
+                    saveProductMeta();
+                    saveSettings();
+                    refreshAllUI();
+                    showBanner(`✅ JSON 백업 복원 완료! 총 ${restDates.length}일치 누적 데이터를 불러왔습니다.`, 'success');
+                } catch (err) {
+                    showBanner('❗ 올바른 JSON 백업 파일이 아닙니다.', 'danger');
+                }
+                e.target.value = '';
+            });
+
+            // 제품 리스트 CSV 다운로드
+            $('btnMgrDownloadCsv').addEventListener('click', () => {
+                const allProducts = getAllUniqueProductsAcrossHistory();
+                if (!allProducts.length) { showBanner('❗ 다운로드할 등록 상품이 없습니다.', 'warning'); return; }
+                const headers = ['상품ID', '원본상품명', '배송구분(로켓배송/로켓프레시)', '관리용별칭', '이미지URL', '쿠팡판매링크URL', '개별리드타임(일)', '발주특이사항메모', '즐겨찾기(Y/N)', '숨김제외(Y/N)', '최근확인재고', '판매가(원)'];
+                const rows = allProducts.map(item => {
+                    const m = getProductMeta(item.id);
+                    const deliv = m.deliveryType === 'FRESH' ? '로켓프레시' : (m.deliveryType === 'ROCKET' ? '로켓배송' : '');
+                    const resolvedUrl = m.customUrl !== undefined ? m.customUrl : (item.url || '');
+                    return [
+                        `="${item.id}"`, escCsv(item.name), escCsv(deliv), escCsv(m.customName),
+                        escCsv(m.imageUrl ?? item.imageUrl), escCsv(resolvedUrl), escCsv(m.leadTime),
+                        escCsv(m.memo), m.starred ? 'Y' : 'N', m.hidden ? 'Y' : 'N',
+                        item.stock ?? '', item.price || 0
+                    ].join(',');
+                });
+                triggerCsvDownload(`쿠팡_제품리스트마스터_${getTodayStr()}.csv`, headers, rows);
+                showBanner(`📥 총 ${allProducts.length}개 제품 리스트 엑셀(CSV)이 다운로드되었습니다.`, 'success');
+            });
+
+            // 제품 리스트 CSV 업로드 (UTF-8 & EUC-KR 자동 감지)
+            $('btnMgrUploadCsv').addEventListener('click', () => $('mgrCsvUploadInput').click());
+            $('mgrCsvUploadInput').addEventListener('change', async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                try {
+                    const buf = await file.arrayBuffer();
+                    let text = new TextDecoder('utf-8').decode(buf);
+                    if (text.includes('\uFFFD')) {
+                        try { text = new TextDecoder('euc-kr').decode(buf); } catch (_) {}
+                    }
+                    const rows = parseCsvText(text);
+                    if (rows.length < 2) { showBanner('❗ 유효한 제품 리스트 CSV 데이터가 없습니다.', 'warning'); return; }
+
+                    let updatedCount = 0;
+                    for (let i = 1; i < rows.length; i++) {
+                        const cols = rows[i];
+                        const rawId = (cols[0] || '').replace(/^="|"$/g, '').replace(/[^0-9]/g, '').trim();
+                        if (!rawId) continue;
+
+                        if (!productMetaDb[rawId]) productMetaDb[rawId] = {};
+                        const m = productMetaDb[rawId];
+
+                        const delivRaw = (cols[2] || '').trim();
+                        if (delivRaw.includes('프레시') || delivRaw.toUpperCase() === 'FRESH') m.deliveryType = 'FRESH';
+                        else if (delivRaw.includes('로켓') || delivRaw.toUpperCase() === 'ROCKET') m.deliveryType = 'ROCKET';
+                        else m.deliveryType = '';
+
+                        m.customName = (cols[3] || '').trim();
+                        m.imageUrl = (cols[4] || '').trim();
+                        m.customUrl = (cols[5] || '').trim();
+                        m.leadTime = (cols[6] || '').trim();
+                        m.memo = (cols[7] || '').trim();
+                        m.starred = (cols[8] || '').trim().toUpperCase() === 'Y';
+                        m.hidden = (cols[9] || '').trim().toUpperCase() === 'Y';
+
+                        Object.values(historyDb.byDate).forEach(rec => {
+                            if (rec?.items?.[rawId]) rec.items[rawId].imageUrl = m.imageUrl;
+                        });
+                        updatedCount++;
+                    }
+                    saveProductMeta();
+                    saveDatabase();
+                    refreshAllUI();
+                    showBanner(`✅ 제품 리스트 CSV에서 ${updatedCount}개 상품의 설정을 일괄 반영했습니다!`, 'success');
+                } catch (err) {
+                    showBanner('❗ CSV 파일 처리 중 오류가 발생했습니다.', 'danger');
+                }
+                e.target.value = '';
+            });
+
+            // 전체 데이터 초기화
+            $('btnResetDb').addEventListener('click', () => {
+                openConfirmModal('전체 데이터 초기화', '브라우저에 저장된 모든 날짜별 누적 기록과 제품 설정을 삭제하시겠습니까? (필요시 먼저 JSON 백업을 받아두세요)', () => {
+                    historyDb = { byDate: {} };
+                    productMetaDb = {};
+                    activeDate = '';
+                    anomalyBriefingDismissedForDate = '';
+                    localStorage.removeItem(DB_STORAGE_KEY);
+                    localStorage.removeItem(META_STORAGE_KEY);
+                    refreshAllUI();
+                    showBanner('🗑️ 모든 누적 데이터가 초기화되었습니다.', 'info');
+                });
+            });
+
+            // 확인 모달 버튼
+            $('modalCancelBtn').addEventListener('click', closeConfirmModal);
+            $('modalConfirmBtn').addEventListener('click', () => {
+                const fn = confirmCallback;
+                closeConfirmModal();
+                if (typeof fn === 'function') fn();
+            });
+
+            // 이미지 / 로고 URL 모달 버튼
+            $('imgModalCloseBtn').addEventListener('click', closeImageUrlModal);
+            $('imgModalCancelBtn').addEventListener('click', closeImageUrlModal);
+            $('imgModalSaveBtn').addEventListener('click', () => {
+                const urlVal = ($('imgModalInput').value || '').trim();
+                if (imgModalMode === 'HEADER_LOGO') {
+                    appSettings.headerLogoUrl = urlVal;
+                    saveSettings();
+                    updateHeaderLogoUI();
+                    showBanner(urlVal ? '✅ 상단 로고 이미지가 적용되었습니다.' : 'ℹ️ 상단 로고가 초기화되었습니다.', 'success');
+                } else if (imgModalTargetProductId) {
+                    if (!productMetaDb[imgModalTargetProductId]) productMetaDb[imgModalTargetProductId] = {};
+                    productMetaDb[imgModalTargetProductId].imageUrl = urlVal;
+                    Object.values(historyDb.byDate).forEach(rec => {
+                        if (rec?.items?.[imgModalTargetProductId]) rec.items[imgModalTargetProductId].imageUrl = urlVal;
+                    });
+                    saveProductMeta();
+                    saveDatabase();
+                    refreshAllUI();
+                    showBanner('🖼️ 상품 이미지 URL이 저장되었습니다.', 'success');
+                }
+                closeImageUrlModal();
+            });
+
+            // 키보드 단축키 (상세 팝업 이전/다음 및 ESC 닫기)
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    if (!$('imgUrlModal').classList.contains('hidden')) closeImageUrlModal();
+                    else if (!$('confirmModal').classList.contains('hidden')) closeConfirmModal();
+                    else if (!$('productDetailModal').classList.contains('hidden')) closeProductDetailModal();
+                } else if (!$('productDetailModal').classList.contains('hidden')) {
+                    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+                    if (e.key === 'ArrowLeft') navigateDetailProduct(-1);
+                    if (e.key === 'ArrowRight') navigateDetailProduct(1);
+                }
+            });
+
+            refreshAllUI();
+            lucide.createIcons();
+        });
+    </script>
+</body>
+</html>
